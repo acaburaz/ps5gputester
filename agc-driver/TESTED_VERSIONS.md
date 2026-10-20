@@ -43,3 +43,18 @@ This diagnostic version reached the later `0x2867`-dword DCBs and ran for
 roughly 45 seconds before `GPU_FAULT_SUSPENDPOINT_TIMEOUT_IN_RUN_ASYNC`.
 It changed the failure mode but did not make the console stable. The stock
 driver was restored after the test.
+
+A repeat on 2026-10-20 used raw ELF SHA-256
+`c63d1402755013ee1f7f750cefc164550935f9cd6081214dccd9403da85b3a30`.
+It failed after approximately 18 seconds with
+`GPU_FAULT_WAVEFRONT_ERROR_ASYNC` and `ILLEGAL_INST` on `SE:0 SA:0 WGP:2`.
+
+## WGP2 indirect-table mask — 2026-10-20
+
+Generated with `patch_audit_driver.py --wgp 2`; raw ELF SHA-256
+`e15b1a51a8526752821abfaa6323fe7cfe1d5707bf37719e660c4bae6799b7d0`.
+The title failed after approximately 17 seconds with
+`GPU_FAULT_WAVEFRONT_ERROR_ASYNC` and `ILLEGAL_INST` still executing on
+`SE:0 SA:0 WGP:2`. Clearing these inspected CU-enable records therefore did
+not reliably remove WGP2 from the native AGC workload. The authenticated stock
+driver was restored and verified afterward.

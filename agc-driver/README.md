@@ -43,12 +43,15 @@ in-place edit of the title's DCB.
 `patch_audit_driver.py` is locked to Astro's inspected 174688-byte `PPSA01325`
 driver. It allocates a 16 MiB direct-memory pool, assigns stable 64 KiB slots
 by source DCB pointer, validates and copies PM4, and copies opcode `0x63`
-indirect shader-register tables before masking WGP4 CU-enable records. It
+indirect shader-register tables before masking selected WGP CU-enable records.
+Use `--wgp 2` or `--wgp 4` to create reproducible comparison builds; WGP4 is
+the default for compatibility with the original experiment. It
 falls back to the original description on allocation, capacity, or parse
 failure. The source SHA-256, submit thunk, initializer, and injection area must
 all match before it writes an output.
 
-This remains a diagnostic canary. The console created the mask-hit marker and
-reached later command buffers, but then failed with
-`GPU_FAULT_SUSPENDPOINT_TIMEOUT_IN_RUN_ASYNC`. The original driver was restored;
-do not treat this build as a stable workaround.
+This remains a diagnostic canary. The WGP4 build has failed both with
+`GPU_FAULT_SUSPENDPOINT_TIMEOUT_IN_RUN_ASYNC` and an illegal instruction on
+WGP2. The WGP2 comparison build still produced an illegal instruction on WGP2,
+showing these table fields do not reliably exclude a WGP from native AGC work.
+The original driver was restored; do not treat either build as a workaround.

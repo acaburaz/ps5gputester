@@ -61,7 +61,13 @@ def rel32(source_after_instruction: int, target: int) -> bytes:
     return struct.pack("<i", displacement)
 
 
-def patch(source: Path, destination: Path) -> tuple[str, int, int]:
+def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]:
+    if not 0 <= wgp <= 7:
+        raise ValueError(f"WGP index must be in 0..7, got {wgp}")
+    cu_bits = 0x3 << (wgp * 2)
+    mask_low = (~cu_bits) & 0xFFFFFFFF
+    mask_high = (~(cu_bits << 16)) & 0xFFFFFFFF
+    mask_both = (~(cu_bits | (cu_bits << 16))) & 0xFFFFFFFF
     data = bytearray(source.read_bytes())
     digest = hashlib.sha256(data).hexdigest()
     profile = PROFILES.get(digest)
@@ -396,13 +402,13 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
         copy_branch(b"\x0f\x84", "mask_03000300")
     copy_branch(b"\xe9", "mask_value_next")
     copy_label("mask_0300")
-    submit_code += b"\x41\x81\x23\xff\xfc\xff\xff"
+    submit_code += b"\x41\x81\x23" + struct.pack("<I", mask_low)
     copy_branch(b"\xe9", "mask_record")
     copy_label("mask_03000000")
-    submit_code += b"\x41\x81\x23\xff\xff\xff\xfc"
+    submit_code += b"\x41\x81\x23" + struct.pack("<I", mask_high)
     copy_branch(b"\xe9", "mask_record")
     copy_label("mask_03000300")
-    submit_code += b"\x41\x81\x23\xff\xfc\xff\xfc"
+    submit_code += b"\x41\x81\x23" + struct.pack("<I", mask_both)
     copy_label("mask_record")
     copy_rip(b"\xc6\x05", state_rva + 0x23, b"\x01")
     copy_label("mask_value_next")
@@ -432,13 +438,13 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
         copy_branch(b"\x0f\x84", "indirect_03000300")
     copy_branch(b"\xe9", "indirect_next")
     copy_label("indirect_0300")
-    submit_code += b"\x81\x62\x04\xff\xfc\xff\xff"
+    submit_code += b"\x81\x62\x04" + struct.pack("<I", mask_low)
     copy_branch(b"\xe9", "indirect_record")
     copy_label("indirect_03000000")
-    submit_code += b"\x81\x62\x04\xff\xff\xff\xfc"
+    submit_code += b"\x81\x62\x04" + struct.pack("<I", mask_high)
     copy_branch(b"\xe9", "indirect_record")
     copy_label("indirect_03000300")
-    submit_code += b"\x81\x62\x04\xff\xfc\xff\xfc"
+    submit_code += b"\x81\x62\x04" + struct.pack("<I", mask_both)
     copy_label("indirect_record")
     copy_rip(b"\xc6\x05", state_rva + 0x23, b"\x01")
     copy_label("indirect_next")
@@ -582,11 +588,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--wgp", type=int, default=4, choices=range(8),
+                        help="WGP index to exclude (default: 4)")
     args = parser.parse_args()
-    profile_name, hook_rva, payload_size = patch(args.source, args.destination)
+    profile_name, hook_rva, payload_size = patch(args.source, args.destination, args.wgp)
     digest = hashlib.sha256(args.destination.read_bytes()).hexdigest()
     print(f"wrote {args.destination}")
     print(f"profile={profile_name}")
+    print(f"excluded_wgp={args.wgp}")
     print(f"audit_init_rva=0x{hook_rva:x} payload_bytes={payload_size}")
     print(f"sha256={digest}")
 
