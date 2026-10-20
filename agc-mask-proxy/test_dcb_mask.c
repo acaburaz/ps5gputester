@@ -21,6 +21,9 @@ main(void)
         pkt3(0x76, 2),
         (0xb858u - 0xb000u) / 4u,
         0xffffffffu,
+        pkt3(0x9b, 2),
+        (0xb018u - 0xb000u) / 4u,
+        0xffffffffu,
         0x80000000u,
     };
     struct agc_dcb_mask_result result;
@@ -28,8 +31,9 @@ main(void)
     assert(dcb[2] == 0x13579bdfu);
     assert(dcb[3] == 0xfffffcffu);
     assert(dcb[6] == 0xfcfffcffu);
-    assert(result.register_writes_seen == 3);
-    assert(result.values_changed == 2);
+    assert(dcb[9] == 0xfffffcffu);
+    assert(result.register_writes_seen == 4);
+    assert(result.values_changed == 3);
 
     uint32_t malformed[] = {pkt3(0x76, 2), 6u};
     uint32_t original[2];

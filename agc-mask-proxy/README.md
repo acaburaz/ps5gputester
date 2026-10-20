@@ -40,10 +40,15 @@ in-place edit of the title's DCB.
 
 ## Astro audit canary
 
-`patch_audit_driver.py` supports the two inspected fakelib builds, including
-Astro's 174688-byte `PPSA01325` driver. It installs a no-call initialization
-trampoline and a `SubmitDcb` forwarding trampoline. It embeds a marker in a
-readable segment for offline identification but makes no imported call from
-`DT_INIT`; lazy PLT entries are not callable there on the tested console. The
-source SHA-256, submit thunk, original initializer, and zero-filled injection
-area must all match before it writes an output.
+`patch_audit_driver.py` is locked to Astro's inspected 174688-byte `PPSA01325`
+driver. It allocates a 16 MiB direct-memory pool, assigns stable 64 KiB slots
+by source DCB pointer, validates and copies PM4, and copies opcode `0x63`
+indirect shader-register tables before masking WGP4 CU-enable records. It
+falls back to the original description on allocation, capacity, or parse
+failure. The source SHA-256, submit thunk, initializer, and injection area must
+all match before it writes an output.
+
+This remains a diagnostic canary. The console created the mask-hit marker and
+reached later command buffers, but then failed with
+`GPU_FAULT_SUSPENDPOINT_TIMEOUT_IN_RUN_ASYNC`. The original driver was restored;
+do not treat this build as a stable workaround.

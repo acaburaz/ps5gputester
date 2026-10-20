@@ -54,8 +54,8 @@ No patched SPRX has been generated or deployed yet.
 
 ## Audit canary
 
-`patch_audit_driver.py` implements the loading and forwarding gates for both
-inspected builds. It redirects `DT_INIT` to a no-call stub in the executable
+`patch_audit_driver.py` implements the current diagnostic gates for Astro's
+inspected build. It redirects `DT_INIT` to a no-call stub in the executable
 segment's existing alignment padding, then tail-jumps to the original
 initializer at RVA `0x10`. It also redirects the version-checked SubmitDcb
 export thunk through instruction-equivalent code in that padding. Command
@@ -77,5 +77,13 @@ its existing asynchronous GPU fault at VA `0x887fe7000`.
 The SubmitDcb forwarding canary passed the same gate on 2026-10-20. Astro again
 created its graphics pipe, submitted work, and reproduced the same asynchronous
 GPU fault at VA `0x887fe7000`, with no startup, execute-only, or CPU fault. This
-proves the version-specific branch route and original thunk semantics. It does
-not yet prove the submission-description layout or safe DCB copying.
+proved the version-specific branch route and original thunk semantics.
+
+Later 2026-10-20 gates validated a 16 MiB direct-memory pool, stable 64 KiB
+copy slots, and bounded PM4 parsing. Direct register packets did not contain
+the target state; Astro supplies it through opcode `0x63` indirect SH-register
+tables. Copying those tables and masking matching WGP4 CU-enable records
+created `/data/agc-mask-hit.bin`, then the title failed after roughly 45 seconds
+with `GPU_FAULT_SUSPENDPOINT_TIMEOUT_IN_RUN_ASYNC`. An unchanged parser run had
+instead produced illegal instructions on WGP2. The mask changes the failure
+mode but is not a stable repair.

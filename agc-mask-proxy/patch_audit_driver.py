@@ -8,8 +8,10 @@ inspected SubmitDcb export thunk through instruction-equivalent code in the
 same executable padding. The init stub deliberately makes no imported calls:
 a library's lazy PLT slots are not safe to call while its DT_INIT routine is
 running. The submit stub allocates direct memory, assigns each distinct source
-DCB a stable 64 KiB shadow slot, copies the commands, and forwards a private
-description. It deliberately does not alter command words yet.
+DCB a stable 64 KiB shadow slot, validates and copies the commands, copies AGC
+indirect shader-register tables into the same slot, and clears the inspected
+WGP4 CU-enable bits only in those private copies. This is a diagnostic canary;
+the console test changed the failure mode but did not produce a stable repair.
 """
 
 from __future__ import annotations
@@ -35,17 +37,6 @@ PROFILES = {
         "direct_size_plt_rva": 0xB650,
         "allocate_plt_rva": 0xB660,
         "map_plt_rva": 0xB670,
-    },
-    "33cf01e315ae887f232b853cd3bef073017475ec1a318322105201677b90e623": {
-        "name": "Animal Well PPSA22520",
-        "size": 174096,
-        "submit_rva": 0x2970,
-        "submit": bytes.fromhex("4889fe488d3d3eff0100e9d1efffff"),
-        "open_plt_rva": 0xBC60,
-        "close_plt_rva": 0xBCC0,
-        "direct_size_plt_rva": 0xBA80,
-        "allocate_plt_rva": 0xBA90,
-        "map_plt_rva": 0xBAA0,
     },
 }
 
@@ -139,7 +130,9 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
         (0xC0, b"/data/agc-pool-ok.bin\0"),
         (0xE0, b"/data/agc-pool-fail.bin\0"),
         (0x110, b"agc-wgp-shadow\0"),
-        (0x140, b"/data/agc-copy-ok.bin\0"),
+        (0x140, b"/data/agc-parse-ok.bin\0"),
+        (0x160, b"/data/agc-parse-fail.bin\0"),
+        (0x180, b"/data/agc-mask-hit.bin\0"),
     ):
         data[state_file_offset + offset : state_file_offset + offset + len(value)] = value
 
@@ -317,8 +310,164 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
     submit_code += (
         b"\x89\xd0\x48\xc1\xe0\x04\x48\x01\xc7"
         b"\xf3\x41\x0f\x6f\x02\xf3\x0f\x7f\x07\x4c\x89\x0f"
-        b"\x48\x89\xfa\x4c\x89\xcf\x4c\x89\xde\xf3\xa5\x48\x89\xd6"
+        b"\x48\x89\xfa\x4c\x89\xcf\x4c\x89\xde\xf3\xa5"
     )
+
+    # Validate the complete copied PM4 stream before it can be selected for
+    # submission. Type-0/1/2/3 packet lengths follow the same bounded walk as
+    # dcb_audit.c, including the one-dword type-3 NOP sentinel.
+    submit_code += b"\x4d\x89\xc8\x41\x8b\x4a\x08"
+    copy_label("parse_loop")
+    submit_code += b"\x85\xc9"
+    copy_branch(b"\x0f\x84", "parse_ok")
+    submit_code += b"\x41\x8b\x00\x89\xc6\xc1\xee\x1e\x83\xfe\x02"
+    copy_branch(b"\x0f\x84", "packet_type2")
+    submit_code += b"\x83\xfe\x01"
+    copy_branch(b"\x0f\x84", "packet_type1")
+    submit_code += b"\x89\xc7\xc1\xef\x10\x81\xe7\xff\x3f\x00\x00\x83\xfe\x03"
+    copy_branch(b"\x0f\x85", "packet_normal")
+    submit_code += b"\x81\xff\xff\x3f\x00\x00"
+    copy_branch(b"\x0f\x85", "packet_normal")
+    submit_code += b"\xc1\xe8\x08\x3c\x10"
+    copy_branch(b"\x0f\x85", "packet_normal")
+    submit_code += b"\xbf\x01\x00\x00\x00"
+    copy_branch(b"\xe9", "packet_length")
+    copy_label("packet_normal")
+    submit_code += b"\x83\xc7\x02"
+    copy_branch(b"\xe9", "packet_length")
+    copy_label("packet_type1")
+    submit_code += b"\xbf\x02\x00\x00\x00"
+    copy_branch(b"\xe9", "packet_length")
+    copy_label("packet_type2")
+    submit_code += b"\xbf\x01\x00\x00\x00"
+    copy_label("packet_length")
+    submit_code += b"\x39\xcf"
+    copy_branch(b"\x0f\x87", "parse_fail")
+    submit_code += b"\x29\xf9\x4d\x8d\x04\xb8"
+    copy_branch(b"\xe9", "parse_loop")
+    copy_label("parse_ok")
+
+    # Second pass over the now-validated copy. Only type-3 SET_SH_REG writes
+    # to the inspected CU-enable registers are changed. WGP4 corresponds to
+    # CU bits 8 and 9 on this RDNA2 target.
+    submit_code += (
+        b"\x41\x52\x41\x8b\x42\x08\x49\x8d\x54\x81\x07\x48\x83\xe2\xf8"
+        b"\x4d\x89\xc8\x41\x8b\x4a\x08"
+    )
+    copy_label("mask_loop")
+    submit_code += b"\x85\xc9"
+    copy_branch(b"\x0f\x84", "mask_done")
+    submit_code += b"\x41\x8b\x00\x89\xc6\xc1\xee\x1e\x83\xfe\x02"
+    copy_branch(b"\x0f\x84", "mask_type2")
+    submit_code += b"\x83\xfe\x01"
+    copy_branch(b"\x0f\x84", "mask_type1")
+    submit_code += b"\x89\xc7\xc1\xef\x10\x81\xe7\xff\x3f\x00\x00\x83\xfe\x03"
+    copy_branch(b"\x0f\x85", "mask_normal")
+    submit_code += b"\x81\xff\xff\x3f\x00\x00"
+    copy_branch(b"\x0f\x85", "mask_type3")
+    submit_code += b"\x41\x89\xc2\x41\xc1\xea\x08\x41\x80\xfa\x10"
+    copy_branch(b"\x0f\x85", "mask_type3")
+    submit_code += b"\xbf\x01\x00\x00\x00"
+    copy_branch(b"\xe9", "mask_advance")
+    copy_label("mask_type3")
+    submit_code += b"\x83\xc7\x02\x41\x89\xc2\x41\xc1\xea\x08\x41\x80\xfa\x76"
+    copy_branch(b"\x0f\x84", "mask_direct")
+    submit_code += b"\x41\x80\xfa\x9b"
+    copy_branch(b"\x0f\x84", "mask_direct")
+    submit_code += b"\x41\x80\xfa\x63"
+    copy_branch(b"\x0f\x84", "mask_indirect")
+    copy_branch(b"\xe9", "mask_advance")
+    copy_label("mask_direct")
+    submit_code += b"\x83\xff\x03"
+    copy_branch(b"\x0f\x82", "mask_advance")
+    submit_code += b"\x41\x8b\x70\x04\x81\xe6\xff\xff\x00\x00\x89\xf8\x83\xe8\x02\x4d\x8d\x58\x08"
+    copy_label("mask_values")
+    submit_code += b"\x85\xc0"
+    copy_branch(b"\x0f\x84", "mask_advance")
+    submit_code += b"\x41\x89\xf2\x41\x83\xea\x06\x41\x83\xfa\x01"
+    copy_branch(b"\x0f\x86", "mask_0300")
+    for register_index in (0x46, 0x87, 0x147):
+        submit_code += b"\x81\xfe" + struct.pack("<I", register_index)
+        copy_branch(b"\x0f\x84", "mask_0300")
+    submit_code += b"\x81\xfe\x07\x01\x00\x00"
+    copy_branch(b"\x0f\x84", "mask_03000000")
+    for register_index in (0x216, 0x217, 0x219, 0x21A):
+        submit_code += b"\x81\xfe" + struct.pack("<I", register_index)
+        copy_branch(b"\x0f\x84", "mask_03000300")
+    copy_branch(b"\xe9", "mask_value_next")
+    copy_label("mask_0300")
+    submit_code += b"\x41\x81\x23\xff\xfc\xff\xff"
+    copy_branch(b"\xe9", "mask_record")
+    copy_label("mask_03000000")
+    submit_code += b"\x41\x81\x23\xff\xff\xff\xfc"
+    copy_branch(b"\xe9", "mask_record")
+    copy_label("mask_03000300")
+    submit_code += b"\x41\x81\x23\xff\xfc\xff\xfc"
+    copy_label("mask_record")
+    copy_rip(b"\xc6\x05", state_rva + 0x23, b"\x01")
+    copy_label("mask_value_next")
+    submit_code += b"\xff\xc6\x49\x83\xc3\x04\xff\xc8"
+    copy_branch(b"\xe9", "mask_values")
+    copy_label("mask_indirect")
+    submit_code += b"\x83\xff\x05"
+    copy_branch(b"\x0f\x82", "mask_advance")
+    submit_code += b"\x41\x8b\x40\x10\x85\xc0"
+    copy_branch(b"\x0f\x84", "mask_advance")
+    submit_code += (
+        b"\x49\x89\xc2\x49\xc1\xe2\x03\x49\x01\xd2"
+        b"\x4c\x89\xce\x48\x81\xc6\x00\x00\x01\x00\x49\x39\xf2"
+    )
+    copy_branch(b"\x0f\x87", "mask_fallback")
+    submit_code += b"\x4d\x8b\x50\x04\x49\x89\x50\x04\x51\x57"
+    copy_label("indirect_values")
+    submit_code += b"\x4d\x8b\x1a\x4c\x89\x1a\x0f\xb7\x32\x41\x89\xf3\x41\x83\xeb\x06\x41\x83\xfb\x01"
+    copy_branch(b"\x0f\x86", "indirect_0300")
+    for register_index in (0x46, 0x87, 0x147):
+        submit_code += b"\x81\xfe" + struct.pack("<I", register_index)
+        copy_branch(b"\x0f\x84", "indirect_0300")
+    submit_code += b"\x81\xfe\x07\x01\x00\x00"
+    copy_branch(b"\x0f\x84", "indirect_03000000")
+    for register_index in (0x216, 0x217, 0x219, 0x21A):
+        submit_code += b"\x81\xfe" + struct.pack("<I", register_index)
+        copy_branch(b"\x0f\x84", "indirect_03000300")
+    copy_branch(b"\xe9", "indirect_next")
+    copy_label("indirect_0300")
+    submit_code += b"\x81\x62\x04\xff\xfc\xff\xff"
+    copy_branch(b"\xe9", "indirect_record")
+    copy_label("indirect_03000000")
+    submit_code += b"\x81\x62\x04\xff\xff\xff\xfc"
+    copy_branch(b"\xe9", "indirect_record")
+    copy_label("indirect_03000300")
+    submit_code += b"\x81\x62\x04\xff\xfc\xff\xfc"
+    copy_label("indirect_record")
+    copy_rip(b"\xc6\x05", state_rva + 0x23, b"\x01")
+    copy_label("indirect_next")
+    submit_code += b"\x49\x83\xc2\x08\x48\x83\xc2\x08\xff\xc8"
+    copy_branch(b"\x0f\x85", "indirect_values")
+    submit_code += b"\x5f\x59"
+    copy_branch(b"\xe9", "mask_advance")
+    copy_label("mask_normal")
+    submit_code += b"\x83\xc7\x02"
+    copy_branch(b"\xe9", "mask_advance")
+    copy_label("mask_type1")
+    submit_code += b"\xbf\x02\x00\x00\x00"
+    copy_branch(b"\xe9", "mask_advance")
+    copy_label("mask_type2")
+    submit_code += b"\xbf\x01\x00\x00\x00"
+    copy_label("mask_advance")
+    submit_code += b"\x29\xf9\x4d\x8d\x04\xb8"
+    copy_branch(b"\xe9", "mask_loop")
+    copy_label("mask_done")
+    submit_code += b"\x4c\x89\xc8\x48\x2b\x05"
+    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, state_rva + 0x10)
+    submit_code += b"\x48\xc1\xe8\x10\x48\xc1\xe0\x04"
+    copy_rip(b"\x48\x8d\x35", state_rva + 0xA00)
+    submit_code += b"\x48\x01\xc6\x41\x5a"
+    copy_branch(b"\xe9", "mask_reports")
+    copy_label("mask_fallback")
+    submit_code += b"\x5f"
+    copy_branch(b"\xe9", "original")
+    copy_label("mask_reports")
     copy_rip(b"\x80\x3d", state_rva + 0x21, b"\x00")
     copy_branch(b"\x0f\x85", "prepared")
     copy_rip(b"\xc6\x05", state_rva + 0x21, b"\x01")
@@ -332,10 +481,42 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
     submit_code += rel32(submit_hook_rva + len(submit_code) + 4, profile["close_plt_rva"])
     copy_label("marker_done")
     submit_code += b"\x5e"
+    copy_rip(b"\x80\x3d", state_rva + 0x23, b"\x00")
+    copy_branch(b"\x0f\x84", "prepared")
+    copy_rip(b"\x80\x3d", state_rva + 0x24, b"\x00")
+    copy_branch(b"\x0f\x85", "prepared")
+    copy_rip(b"\xc6\x05", state_rva + 0x24, b"\x01")
+    submit_code += b"\x56"
+    copy_rip(b"\x48\x8d\x3d", state_rva + 0x180)
+    submit_code += b"\xbe\x01\x06\x00\x00\xba\xa4\x01\x00\x00\x31\xc0\xe8"
+    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, profile["open_plt_rva"])
+    submit_code += b"\x85\xc0"
+    copy_branch(b"\x0f\x88", "mask_marker_done")
+    submit_code += b"\x89\xc7\xe8"
+    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, profile["close_plt_rva"])
+    copy_label("mask_marker_done")
+    submit_code += b"\x5e"
     copy_label("prepared")
     submit_code += b"\x48\x8d\x3d"
     submit_code += rel32(submit_hook_rva + len(submit_code) + 4, context_rva)
     copy_branch(b"\xe9", "common")
+    copy_label("parse_fail")
+    copy_rip(b"\x80\x3d", state_rva + 0x22, b"\x00")
+    copy_branch(b"\x0f\x85", "parse_fail_restore")
+    copy_rip(b"\xc6\x05", state_rva + 0x22, b"\x01")
+    submit_code += b"\x41\x52"
+    copy_rip(b"\x48\x8d\x3d", state_rva + 0x160)
+    submit_code += b"\xbe\x01\x06\x00\x00\xba\xa4\x01\x00\x00\x31\xc0\xe8"
+    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, profile["open_plt_rva"])
+    submit_code += b"\x85\xc0"
+    copy_branch(b"\x0f\x88", "parse_fail_reported")
+    submit_code += b"\x89\xc7\xe8"
+    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, profile["close_plt_rva"])
+    copy_label("parse_fail_reported")
+    submit_code += b"\x41\x5a"
+    copy_label("parse_fail_restore")
+    submit_code += b"\x4c\x89\xd7"
+    copy_branch(b"\xe9", "original")
     copy_label("original")
     submit_code += b"\x48\x89\xfe\x48\x8d\x3d"
     submit_code += rel32(submit_hook_rva + len(submit_code) + 4, context_rva)
