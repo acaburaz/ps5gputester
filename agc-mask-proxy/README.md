@@ -15,4 +15,4 @@ The first build must be **logging-only**. It should intercept `sceAgcDriverSubmi
 
 ## Current status
 
-Design only. No replacement SPRX is produced or deployed yet. The RADV tester validates the mask concept, but RADV's command construction differs from Sony's native AGC stack.
+A bounded, read-only PM4 walker is in `dcb_audit.c`; its host test covers a `SET_SH_REG` packet. No replacement SPRX is produced or deployed yet. The RADV tester validates the mask concept, but RADV's command construction differs from Sony's native AGC stack.
