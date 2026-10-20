@@ -37,6 +37,7 @@ PROFILES = {
 PT_LOAD = 1
 PT_DYNAMIC = 2
 PF_X = 1
+PF_R = 4
 DT_NULL = 0
 DT_INIT = 12
 
@@ -69,7 +70,7 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
             "<QQQQQ", data, offset + 8
         )
         if p_type == PT_LOAD:
-            loads.append((p_vaddr, p_offset, p_filesz))
+            loads.append((p_vaddr, p_offset, p_filesz, p_memsz, p_flags, offset))
             if p_flags & PF_X:
                 executable = (offset, p_offset, p_vaddr, p_filesz, p_memsz)
         elif p_type == PT_DYNAMIC:
@@ -88,20 +89,31 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
 
     hook_rva = (virtual_address + file_size + 15) & ~15
     hook_file_offset = file_offset + (hook_rva - virtual_address)
-    next_load_rva = min(vaddr for vaddr, _off, _size in loads if vaddr > hook_rva)
+    next_load_rva = min(load[0] for load in loads if load[0] > hook_rva)
+    readable = min(
+        (load for load in loads if load[0] >= next_load_rva and load[4] & PF_R and not load[4] & PF_X),
+        key=lambda load: load[0],
+    )
+    read_rva, read_file_offset, read_file_size, read_memory_size, _flags, read_phdr_offset = readable
+    marker_rva = (read_rva + read_file_size + 15) & ~15
+    marker_file_offset = read_file_offset + (marker_rva - read_rva)
+    next_after_read = min(load[0] for load in loads if load[0] > marker_rva)
 
     # sub rsp,8; lea marker(%rip),rdi; call puts@plt; add rsp,8; jmp original_init
-    marker_rva = hook_rva + 25
     code = bytearray(b"\x48\x83\xec\x08\x48\x8d\x3d")
     code += rel32(hook_rva + 11, marker_rva)
     code += b"\xe8" + rel32(hook_rva + 16, profile["puts_plt_rva"])
     code += b"\x48\x83\xc4\x08\xe9" + rel32(hook_rva + 25, EXPECTED_INIT)
-    payload = code + MARKER
-    end_rva = hook_rva + len(payload)
-    if end_rva > next_load_rva or hook_file_offset + len(payload) > len(data):
+    end_rva = hook_rva + len(code)
+    marker_end_rva = marker_rva + len(MARKER)
+    if end_rva > next_load_rva or hook_file_offset + len(code) > len(data):
         raise ValueError("audit stub does not fit in executable alignment padding")
-    if any(data[hook_file_offset : hook_file_offset + len(payload)]):
+    if marker_end_rva > next_after_read or marker_file_offset + len(MARKER) > len(data):
+        raise ValueError("audit marker does not fit in readable alignment padding")
+    if any(data[hook_file_offset : hook_file_offset + len(code)]):
         raise ValueError("audit stub target is not zero-filled padding")
+    if any(data[marker_file_offset : marker_file_offset + len(MARKER)]):
+        raise ValueError("audit marker target is not zero-filled padding")
 
     dynamic_offset, dynamic_size = dynamic
     init_value_offset = None
@@ -117,15 +129,19 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
     if init_value_offset is None:
         raise ValueError("DT_INIT was not found")
 
-    data[hook_file_offset : hook_file_offset + len(payload)] = payload
+    data[hook_file_offset : hook_file_offset + len(code)] = code
+    data[marker_file_offset : marker_file_offset + len(MARKER)] = MARKER
     struct.pack_into("<Q", data, init_value_offset, hook_rva)
     new_load_size = end_rva - virtual_address
     struct.pack_into("<Q", data, phdr_offset + 32, new_load_size)
     struct.pack_into("<Q", data, phdr_offset + 40, max(memory_size, new_load_size))
+    new_read_size = marker_end_rva - read_rva
+    struct.pack_into("<Q", data, read_phdr_offset + 32, new_read_size)
+    struct.pack_into("<Q", data, read_phdr_offset + 40, max(read_memory_size, new_read_size))
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(data)
-    return profile["name"], hook_rva, len(payload)
+    return profile["name"], hook_rva, len(code) + len(MARKER)
 
 
 def main() -> None:

@@ -59,3 +59,10 @@ builds. It redirects `DT_INIT` to an injected stub in the executable segment's
 existing alignment padding. The stub calls the already imported `puts` PLT
 entry (`0xb8d0` in Astro, `0xbce0` in Animal Well) once, then tail-jumps to the original initializer at RVA
 `0x10`. It leaves the submit thunk and all command buffers unchanged.
+
+The first console run proved that the development FSELF passes authentication,
+but placing the marker beside the stub in `xotext` caused
+`SYSTEM_XO_VIOLATION`: PS5 executable text is execute-only, and `puts` tried to
+read the string at `libSceAgcDriver+0xb9e9`. The canary now keeps only machine
+code in the executable padding and places the marker in extended readable
+segment padding.
