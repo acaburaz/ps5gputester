@@ -1,0 +1,10 @@
+#version 450
+layout(local_size_x=256) in;
+layout(binding=0,std430) buffer OutputBuffer { uint values[]; } outputBuffer;
+layout(push_constant) uniform Parameters { uint count; uint base; uint seed; uint rounds; } p;
+void main(){
+	uint index=p.base+gl_GlobalInvocationID.x; if(index>=p.count)return;
+	uint value=index^p.seed;
+	for(uint round=0;round<p.rounds;++round){value^=value>>16;value*=0x7feb352du;value^=value>>15;value*=0x846ca68bu;value^=value>>16;value+=0x9e3779b9u+round;}
+	outputBuffer.values[index]=value;
+}

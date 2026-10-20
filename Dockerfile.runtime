@@ -1,0 +1,2 @@
+FROM ps5-gpu-test-builder-final
+RUN apt-get update && apt-get install -y --no-install-recommends libclang-rt-18-dev && rm -rf /var/lib/apt/lists/*
