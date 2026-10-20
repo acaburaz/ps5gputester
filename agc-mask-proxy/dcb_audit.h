@@ -18,6 +18,7 @@ struct agc_dcb_register_write {
     const uint32_t *values;
     size_t value_count;
     size_t packet_dword;
+    size_t value_dword;
 };
 
 typedef void (*agc_dcb_register_callback)(const struct agc_dcb_register_write *write, void *user);

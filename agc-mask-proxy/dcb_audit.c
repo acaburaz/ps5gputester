@@ -4,8 +4,8 @@
 #define PKT3_NOP 0x10u
 #define PKT3_SET_SH_REG 0x76u
 #define PKT3_SET_UCONFIG_REG 0x79u
-#define SH_REG_BASE 0x00002c00u
-#define UCONFIG_REG_BASE 0x0000c000u
+#define SH_REG_BASE 0x0000b000u
+#define UCONFIG_REG_BASE 0x00030000u
 
 bool
 agc_dcb_audit(const uint32_t *dwords, size_t count, agc_dcb_register_callback callback, void *user)
@@ -58,6 +58,7 @@ agc_dcb_audit(const uint32_t *dwords, size_t count, agc_dcb_register_callback ca
                 .values = &dwords[cursor + 2],
                 .value_count = packet_count - 2,
                 .packet_dword = cursor,
+                .value_dword = cursor + 2,
             };
             callback(&write, user);
         }

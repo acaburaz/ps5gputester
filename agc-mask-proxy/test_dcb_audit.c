@@ -20,7 +20,7 @@ int main(void)
     struct result result = {0};
     assert(agc_dcb_audit(dcb, 4, collect, &result));
     assert(result.calls == 1);
-    assert(result.address == 0x2c18u);
+    assert(result.address == 0xb018u);
     assert(result.value == 0x12345678u);
     puts("dcb_audit: PASS");
     return 0;
