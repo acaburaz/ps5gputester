@@ -31,3 +31,11 @@ No replacement SPRX is produced or deployed yet. The submit-description ABI and
 a non-recursive route to the original system function must be confirmed before
 the wrapper is safe to run in a native title. RADV validates the mask concept,
 but its command construction differs from Sony's native AGC stack.
+
+## Astro audit canary
+
+`patch_audit_driver.py` supports the two inspected fakelib builds, including
+Astro's 174688-byte `PPSA01325` driver. It emits a one-time module-load marker through the driver's existing
+`puts` import and then runs the original initializer. It does not intercept or
+alter submission yet. The source SHA-256, submit thunk, original initializer,
+and zero-filled injection area must all match before it writes an output.

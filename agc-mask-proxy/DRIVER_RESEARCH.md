@@ -51,3 +51,11 @@ word pointer, count, and flag without dereferencing an unbounded buffer.
    place an experimental build in the global fakelib directory.
 
 No patched SPRX has been generated or deployed yet.
+
+## Audit canary
+
+`patch_audit_driver.py` implements the first loading gate for both inspected
+builds. It redirects `DT_INIT` to an injected stub in the executable segment's
+existing alignment padding. The stub calls the already imported `puts` PLT
+entry (`0xb8d0` in Astro, `0xbce0` in Animal Well) once, then tail-jumps to the original initializer at RVA
+`0x10`. It leaves the submit thunk and all command buffers unchanged.
