@@ -58,3 +58,27 @@ The title failed after approximately 17 seconds with
 `SE:0 SA:0 WGP:2`. Clearing these inspected CU-enable records therefore did
 not reliably remove WGP2 from the native AGC workload. The authenticated stock
 driver was restored and verified afterward.
+
+### Guarded active-bit build
+
+Raw ELF SHA-256:
+`90bcef8327f38eb2de59e3d4ea1e38545da573c506b6e82956608af8ffd17c4f`.
+This version skips GPU-only indirect-table addresses and creates
+`agc-mask-1.bin` only when a readable incoming record had WGP2 enabled before
+the hook cleared it. Two consecutive runs recreated that marker and then
+failed identically with `GPU_FAULT_PAGE_FAULT_ASYNC`: five waves on
+`SE:0 SA:0 WGP:0`, shader PC `0x500192914`, reported a data-read
+`XNACK_ERROR MEMVIOL`. No CPU hook fault occurred. This is evidence that the
+record mutation changed execution, but it is not evidence of a stable hardware
+unit exclusion.
+
+## Combined WGP0+WGP2 diagnostic — 2026-10-20
+
+Generated with `patch_audit_driver.py --wgp 0,2`; raw ELF SHA-256
+`58cc89b3d35f0e2a87c00bb5d7ceb4fb8be75e4727ecea967156d10bc0ccd5b3`.
+The run recreated `agc-mask-1.bin`, then failed with an instruction-fetch page
+fault at VA `0x0`. The kernel reported SQ message errors across both shader
+engines, multiple shader arrays, and WGP0 through WGP4, including the nominally
+excluded units. This rules out treating the inspected CU-enable fields as a
+simple, global hardware-disable bitmap. The stock driver was restored and its
+SHA-256 verified afterward.

@@ -61,10 +61,13 @@ def rel32(source_after_instruction: int, target: int) -> bytes:
     return struct.pack("<i", displacement)
 
 
-def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]:
-    if not 0 <= wgp <= 7:
-        raise ValueError(f"WGP index must be in 0..7, got {wgp}")
-    cu_bits = 0x3 << (wgp * 2)
+def patch(source: Path, destination: Path, wgp: int | tuple[int, ...] = 4) -> tuple[str, int, int]:
+    wgps = (wgp,) if isinstance(wgp, int) else tuple(dict.fromkeys(wgp))
+    if not wgps or any(index < 0 or index > 7 for index in wgps):
+        raise ValueError(f"WGP indices must be in 0..7, got {wgps}")
+    cu_bits = 0
+    for index in wgps:
+        cu_bits |= 0x3 << (index * 2)
     mask_low = (~cu_bits) & 0xFFFFFFFF
     mask_high = (~(cu_bits << 16)) & 0xFFFFFFFF
     mask_both = (~(cu_bits | (cu_bits << 16))) & 0xFFFFFFFF
@@ -138,7 +141,9 @@ def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]
         (0x110, b"agc-wgp-shadow\0"),
         (0x140, b"/data/agc-parse-ok.bin\0"),
         (0x160, b"/data/agc-parse-fail.bin\0"),
-        (0x180, b"/data/agc-mask-hit.bin\0"),
+        # The hook changes the final digit to 1 if an incoming indirect
+        # register record actually had one of the selected WGP bits enabled.
+        (0x180, b"/data/agc-mask-0.bin\0"),
     ):
         data[state_file_offset + offset : state_file_offset + offset + len(value)] = value
 
@@ -231,33 +236,8 @@ def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]
             "<i", submit_code, displacement_offset, target_offset - (displacement_offset + 4)
         )
 
-    submit_code += b"\xf0\x48\xff\x05"
-    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, state_rva + 8)
-    submit_code += b"\x8b\x47\x08\x3b\x05"
-    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, state_rva + 4)
-    submit_code += b"\x0f\x86\x00\x00\x00\x00\x89\x05"
-    forward_branch_disp_offset = len(submit_code) - 6
-    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, state_rva + 4)
-    submit_code += b"\x57\x48\x8d\x3d"
-    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, audit_path_rva + 14)
-    submit_code += b"\xb9\x08\x00\x00\x00"
-    hex_loop_offset = len(submit_code)
-    submit_code += (
-        b"\xc1\xc0\x04\x89\xc6\x83\xe6\x0f\x83\xfe\x09\x76\x03"
-        b"\x83\xc6\x27\x83\xc6\x30\x40\x88\x37\x48\xff\xc7\xff\xc9\x75\x00"
-    )
-    loop_branch_index = len(submit_code) - 1
-    loop_displacement = hex_loop_offset - (loop_branch_index + 1)
-    if not -128 <= loop_displacement <= 127:
-        raise ValueError("hex conversion loop is out of range")
-    submit_code[loop_branch_index] = loop_displacement & 0xFF
-    submit_code += b"\x48\x8d\x3d"
-    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, audit_path_rva)
-    submit_code += b"\xbe\x01\x06\x00\x00\xba\xa4\x01\x00\x00\x31\xc0\xe8"
-    submit_code += rel32(submit_hook_rva + len(submit_code) + 4, profile["open_plt_rva"])
-    submit_code += b"\x85\xc0\x78\x07\x89\xc7"
-    submit_code += b"\xe8" + rel32(submit_hook_rva + len(submit_code) + 5, profile["close_plt_rva"])
-    submit_code += b"\x5f"
+    # Earlier canaries already established the maximum DCB size.  Keep this
+    # focused diagnostic small by omitting per-size filename telemetry.
     copy_offset = len(submit_code)
 
     # Copy each DCB into a stable per-source 64 KiB direct-memory slot. The
@@ -424,7 +404,14 @@ def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]
         b"\x4c\x89\xce\x48\x81\xc6\x00\x00\x01\x00\x49\x39\xf2"
     )
     copy_branch(b"\x0f\x87", "mask_fallback")
-    submit_code += b"\x4d\x8b\x50\x04\x49\x89\x50\x04\x51\x57"
+    submit_code += b"\x4d\x8b\x50\x04"
+    # Some 0x63 packets name GPU-only virtual addresses.  They are valid for
+    # the command processor but fault if this CPU hook dereferences them.
+    # Leave that class of table untouched and keep scanning the DCB.
+    submit_code += b"\x49\xbb" + struct.pack("<Q", 0x0000000F00000000)
+    submit_code += b"\x4d\x39\xda"
+    copy_branch(b"\x0f\x83", "mask_advance")
+    submit_code += b"\x49\x89\x50\x04\x51\x57"
     copy_label("indirect_values")
     submit_code += b"\x4d\x8b\x1a\x4c\x89\x1a\x0f\xb7\x32\x41\x89\xf3\x41\x83\xeb\x06\x41\x83\xfb\x01"
     copy_branch(b"\x0f\x86", "indirect_0300")
@@ -438,12 +425,21 @@ def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]
         copy_branch(b"\x0f\x84", "indirect_03000300")
     copy_branch(b"\xe9", "indirect_next")
     copy_label("indirect_0300")
+    submit_code += b"\xf7\x42\x04" + struct.pack("<I", cu_bits)
+    submit_code += b"\x0f\x95\xc0"
+    copy_rip(b"\x08\x05", state_rva + 0x25)
     submit_code += b"\x81\x62\x04" + struct.pack("<I", mask_low)
     copy_branch(b"\xe9", "indirect_record")
     copy_label("indirect_03000000")
+    submit_code += b"\xf7\x42\x04" + struct.pack("<I", cu_bits << 16)
+    submit_code += b"\x0f\x95\xc0"
+    copy_rip(b"\x08\x05", state_rva + 0x25)
     submit_code += b"\x81\x62\x04" + struct.pack("<I", mask_high)
     copy_branch(b"\xe9", "indirect_record")
     copy_label("indirect_03000300")
+    submit_code += b"\xf7\x42\x04" + struct.pack("<I", cu_bits | (cu_bits << 16))
+    submit_code += b"\x0f\x95\xc0"
+    copy_rip(b"\x08\x05", state_rva + 0x25)
     submit_code += b"\x81\x62\x04" + struct.pack("<I", mask_both)
     copy_label("indirect_record")
     copy_rip(b"\xc6\x05", state_rva + 0x23, b"\x01")
@@ -493,6 +489,9 @@ def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]
     copy_branch(b"\x0f\x85", "prepared")
     copy_rip(b"\xc6\x05", state_rva + 0x24, b"\x01")
     submit_code += b"\x56"
+    copy_rip(b"\x0f\xb6\x05", state_rva + 0x25)
+    submit_code += b"\x04\x30"
+    copy_rip(b"\x88\x05", state_rva + 0x180 + 15)
     copy_rip(b"\x48\x8d\x3d", state_rva + 0x180)
     submit_code += b"\xbe\x01\x06\x00\x00\xba\xa4\x01\x00\x00\x31\xc0\xe8"
     submit_code += rel32(submit_hook_rva + len(submit_code) + 4, profile["open_plt_rva"])
@@ -536,13 +535,6 @@ def patch(source: Path, destination: Path, wgp: int = 4) -> tuple[str, int, int]
             displacement_offset,
             target_offset - (displacement_offset + 4),
         )
-    struct.pack_into(
-        "<i",
-        submit_code,
-        forward_branch_disp_offset,
-        copy_offset - (forward_branch_disp_offset + 4),
-    )
-
     code = init_code + bytes(16 - len(init_code)) + submit_code
     end_rva = init_hook_rva + len(code)
     marker_end_rva = marker_rva + len(MARKER)
@@ -588,14 +580,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
-    parser.add_argument("--wgp", type=int, default=4, choices=range(8),
-                        help="WGP index to exclude (default: 4)")
+    parser.add_argument(
+        "--wgp", default="4",
+        help="comma-separated WGP indices to exclude, each in 0..7 (default: 4)",
+    )
     args = parser.parse_args()
-    profile_name, hook_rva, payload_size = patch(args.source, args.destination, args.wgp)
+    try:
+        wgps = tuple(int(value) for value in args.wgp.split(","))
+    except ValueError as error:
+        parser.error(f"invalid --wgp value: {error}")
+    if not wgps or any(index < 0 or index > 7 for index in wgps):
+        parser.error("--wgp indices must each be in 0..7")
+    profile_name, hook_rva, payload_size = patch(args.source, args.destination, wgps)
     digest = hashlib.sha256(args.destination.read_bytes()).hexdigest()
     print(f"wrote {args.destination}")
     print(f"profile={profile_name}")
-    print(f"excluded_wgp={args.wgp}")
+    print(f"excluded_wgp={','.join(map(str, wgps))}")
     print(f"audit_init_rva=0x{hook_rva:x} payload_bytes={payload_size}")
     print(f"sha256={digest}")
 

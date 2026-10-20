@@ -42,10 +42,15 @@ in-place edit of the title's DCB.
 
 `patch_audit_driver.py` is locked to Astro's inspected 174688-byte `PPSA01325`
 driver. It allocates a 16 MiB direct-memory pool, assigns stable 64 KiB slots
-by source DCB pointer, validates and copies PM4, and copies opcode `0x63`
-indirect shader-register tables before masking selected WGP CU-enable records.
-Use `--wgp 2` or `--wgp 4` to create reproducible comparison builds; WGP4 is
-the default for compatibility with the original experiment. It
+by source DCB pointer, validates and copies PM4, and copies CPU-readable opcode
+`0x63` indirect shader-register tables before masking selected WGP CU-enable
+records. GPU-only table addresses at or above `0x0000000f00000000` are left
+untouched; dereferencing one from the CPU hook caused a verified startup fault.
+Use `--wgp 2`, `--wgp 4`, or a comma-separated diagnostic set such as
+`--wgp 0,2`; WGP4 is the default for compatibility with the original
+experiment. `agc-mask-1.bin` means at least one readable incoming record had a
+selected bit set before masking, while `agc-mask-0.bin` means the matched bits
+were already clear. The hook
 falls back to the original description on allocation, capacity, or parse
 failure. The source SHA-256, submit thunk, initializer, and injection area must
 all match before it writes an output.
@@ -54,4 +59,9 @@ This remains a diagnostic canary. The WGP4 build has failed both with
 `GPU_FAULT_SUSPENDPOINT_TIMEOUT_IN_RUN_ASYNC` and an illegal instruction on
 WGP2. The WGP2 comparison build still produced an illegal instruction on WGP2,
 showing these table fields do not reliably exclude a WGP from native AGC work.
-The original driver was restored; do not treat either build as a workaround.
+The guarded WGP2 build twice changed the repeatable failure to a WGP0 data-read
+page fault at shader PC `0x500192914`. Masking WGP0 and WGP2 together produced
+a null instruction-fetch fault and SQ errors across many WGPs. These results
+show that the inspected fields affect execution but are not a safe global WGP
+disable mechanism. The original driver was restored; do not treat any mask
+build as a workaround.
