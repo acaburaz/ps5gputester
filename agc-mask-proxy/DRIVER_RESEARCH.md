@@ -54,11 +54,12 @@ No patched SPRX has been generated or deployed yet.
 
 ## Audit canary
 
-`patch_audit_driver.py` implements the first loading gate for both inspected
-builds. It redirects `DT_INIT` to an injected stub in the executable segment's
-existing alignment padding. The stub calls the already imported `puts` PLT
-entry (`0xb8d0` in Astro, `0xbce0` in Animal Well) once, then tail-jumps to the original initializer at RVA
-`0x10`. It leaves the submit thunk and all command buffers unchanged.
+`patch_audit_driver.py` implements the loading and forwarding gates for both
+inspected builds. It redirects `DT_INIT` to a no-call stub in the executable
+segment's existing alignment padding, then tail-jumps to the original
+initializer at RVA `0x10`. It also redirects the version-checked SubmitDcb
+export thunk through instruction-equivalent code in that padding. Command
+buffers remain unchanged.
 
 The first console run proved that the development FSELF passes authentication,
 but placing the marker beside the stub in `xotext` caused
@@ -66,3 +67,15 @@ but placing the marker beside the stub in `xotext` caused
 read the string at `libSceAgcDriver+0xb9e9`. The canary now keeps only machine
 code in the executable padding and places the marker in extended readable
 segment padding.
+
+The second logging attempt placed the marker in readable memory, but calling
+the `puts` PLT entry from `DT_INIT` transferred control to an unresolved lazy
+slot in the libc data mapping (`libSceLibcInternal+0x338`). The no-call init
+trampoline then passed: Astro created its graphics pipe and later reproduced
+its existing asynchronous GPU fault at VA `0x887fe7000`.
+
+The SubmitDcb forwarding canary passed the same gate on 2026-10-20. Astro again
+created its graphics pipe, submitted work, and reproduced the same asynchronous
+GPU fault at VA `0x887fe7000`, with no startup, execute-only, or CPU fault. This
+proves the version-specific branch route and original thunk semantics. It does
+not yet prove the submission-description layout or safe DCB copying.

@@ -27,15 +27,23 @@ caller-provided storage. It preserves the source description and DCB, refuses
 zero-length or oversized submissions, and points only the prepared description
 at the masked copy. A console wrapper must flush this copy before forwarding it.
 
-No replacement SPRX is produced or deployed yet. The submit-description ABI and
-a non-recursive route to the original system function must be confirmed before
-the wrapper is safe to run in a native title. RADV validates the mask concept,
-but its command construction differs from Sony's native AGC stack.
+The version-locked canary now redirects `sceAgcDriverSubmitDcb` through an
+instruction-equivalent forwarding stub in executable padding. On Astro it
+survived initialization and submissions until the title reproduced its normal
+asynchronous GPU fault. The source command buffer remained untouched. RADV
+validates the mask concept, but its command construction differs from Sony's
+native AGC stack.
+
+The next gate needs persistent GPU-visible copy storage and a cache flush before
+the common submit routine is called. Do not replace the forwarding stub with an
+in-place edit of the title's DCB.
 
 ## Astro audit canary
 
 `patch_audit_driver.py` supports the two inspected fakelib builds, including
-Astro's 174688-byte `PPSA01325` driver. It emits a one-time module-load marker through the driver's existing
-`puts` import and then runs the original initializer. It does not intercept or
-alter submission yet. The source SHA-256, submit thunk, original initializer,
-and zero-filled injection area must all match before it writes an output.
+Astro's 174688-byte `PPSA01325` driver. It installs a no-call initialization
+trampoline and a `SubmitDcb` forwarding trampoline. It embeds a marker in a
+readable segment for offline identification but makes no imported call from
+`DT_INIT`; lazy PLT entries are not callable there on the tested console. The
+source SHA-256, submit thunk, original initializer, and zero-filled injection
+area must all match before it writes an output.

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Build the first, logging-only libSceAgcDriver canary.
+"""Build a no-call libSceAgcDriver SubmitDcb forwarding canary.
 
 The patch is locked to inspected fakelib images. It extends the
-executable load into existing alignment padding, redirects DT_INIT to a small
-stub that prints one marker through the driver's existing puts PLT entry, then
-tail-jumps to the original initializer. SubmitDcb is deliberately untouched.
+executable load into existing alignment padding and redirects DT_INIT to a
+small stub that tail-jumps to the original initializer. It also redirects the
+inspected SubmitDcb export thunk through instruction-equivalent code in the
+same executable padding. The stub deliberately
+makes no imported calls: a library's lazy PLT slots are not safe to call while
+its DT_INIT routine is running.  A readable marker remains embedded for
+forensic identification. The submitted command buffer is deliberately
+untouched.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ import struct
 from pathlib import Path
 
 EXPECTED_INIT = 0x10
-MARKER = b"[agc-wgp-mask] audit driver loaded; SubmitDcb unchanged\0"
+MARKER = b"[agc-wgp-mask] SubmitDcb forwarding canary; DCB unchanged\0"
 
 PROFILES = {
     "5590ee3fe3c2f73200674e17938a6f3e3dece8826a0ecc7249dcba2183adcf07": {
@@ -23,14 +28,12 @@ PROFILES = {
         "size": 174688,
         "submit_rva": 0x2960,
         "submit": bytes.fromhex("4889fe488d3d4eff0100e941f0ffff"),
-        "puts_plt_rva": 0xB8D0,
     },
     "33cf01e315ae887f232b853cd3bef073017475ec1a318322105201677b90e623": {
         "name": "Animal Well PPSA22520",
         "size": 174096,
         "submit_rva": 0x2970,
         "submit": bytes.fromhex("4889fe488d3d3eff0100e9d1efffff"),
-        "puts_plt_rva": 0xBCE0,
     },
 }
 
@@ -87,9 +90,10 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
     if data[submit_file_offset : submit_file_offset + len(submit)] != submit:
         raise ValueError("SubmitDcb thunk bytes do not match the inspected build")
 
-    hook_rva = (virtual_address + file_size + 15) & ~15
-    hook_file_offset = file_offset + (hook_rva - virtual_address)
-    next_load_rva = min(load[0] for load in loads if load[0] > hook_rva)
+    init_hook_rva = (virtual_address + file_size + 15) & ~15
+    submit_hook_rva = init_hook_rva + 16
+    hook_file_offset = file_offset + (init_hook_rva - virtual_address)
+    next_load_rva = min(load[0] for load in loads if load[0] > init_hook_rva)
     readable = min(
         (load for load in loads if load[0] >= next_load_rva and load[4] & PF_R and not load[4] & PF_X),
         key=lambda load: load[0],
@@ -99,12 +103,20 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
     marker_file_offset = read_file_offset + (marker_rva - read_rva)
     next_after_read = min(load[0] for load in loads if load[0] > marker_rva)
 
-    # sub rsp,8; lea marker(%rip),rdi; call puts@plt; add rsp,8; jmp original_init
-    code = bytearray(b"\x48\x83\xec\x08\x48\x8d\x3d")
-    code += rel32(hook_rva + 11, marker_rva)
-    code += b"\xe8" + rel32(hook_rva + 16, profile["puts_plt_rva"])
-    code += b"\x48\x83\xc4\x08\xe9" + rel32(hook_rva + 25, EXPECTED_INIT)
-    end_rva = hook_rva + len(code)
+    # jmp original_init. Do not call an imported function from DT_INIT: the
+    # PS5 loader has not made this module's lazy PLT entries callable yet.
+    init_code = bytearray(b"\xe9") + rel32(init_hook_rva + 5, EXPECTED_INIT)
+
+    # Preserve the exact original export-thunk semantics in a new location:
+    # mov rsi,rdi; lea submission_context(%rip),rdi; jmp common_submit.
+    context_rva = submit_rva + 10 + struct.unpack_from("<i", submit, 6)[0]
+    common_submit_rva = submit_rva + len(submit) + struct.unpack_from("<i", submit, 11)[0]
+    submit_code = bytearray(b"\x48\x89\xfe\x48\x8d\x3d")
+    submit_code += rel32(submit_hook_rva + 10, context_rva)
+    submit_code += b"\xe9" + rel32(submit_hook_rva + 15, common_submit_rva)
+
+    code = init_code + bytes(16 - len(init_code)) + submit_code
+    end_rva = init_hook_rva + len(code)
     marker_end_rva = marker_rva + len(MARKER)
     if end_rva > next_load_rva or hook_file_offset + len(code) > len(data):
         raise ValueError("audit stub does not fit in executable alignment padding")
@@ -130,8 +142,12 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
         raise ValueError("DT_INIT was not found")
 
     data[hook_file_offset : hook_file_offset + len(code)] = code
+    submit_branch = b"\xe9" + rel32(submit_rva + 5, submit_hook_rva)
+    data[submit_file_offset : submit_file_offset + len(submit)] = (
+        submit_branch + b"\x90" * (len(submit) - len(submit_branch))
+    )
     data[marker_file_offset : marker_file_offset + len(MARKER)] = MARKER
-    struct.pack_into("<Q", data, init_value_offset, hook_rva)
+    struct.pack_into("<Q", data, init_value_offset, init_hook_rva)
     new_load_size = end_rva - virtual_address
     struct.pack_into("<Q", data, phdr_offset + 32, new_load_size)
     struct.pack_into("<Q", data, phdr_offset + 40, max(memory_size, new_load_size))
@@ -141,7 +157,7 @@ def patch(source: Path, destination: Path) -> tuple[str, int, int]:
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(data)
-    return profile["name"], hook_rva, len(code) + len(MARKER)
+    return profile["name"], init_hook_rva, len(code) + len(MARKER)
 
 
 def main() -> None:
