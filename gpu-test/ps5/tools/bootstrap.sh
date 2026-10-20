@@ -9,8 +9,8 @@
 #
 # A title links RADV, Mesa's Vulkan driver, built for the console by PS5_Vulkan
 # from PS5_Mesa, and the platform layer of the payload SDK fork, PS5_PayloadSDK.
-# They are checked out beside this repository (../PS5_Vulkan, ../PS5_Mesa,
-# ../PS5_PayloadSDK) and built once:
+# They are checked out beside the parent repository (../../PS5_Vulkan, ../../PS5_Mesa,
+# ../../PS5_PayloadSDK) and built once:
 #
 #   PS5_Vulkan   tools/setup-native-dependencies.sh   its payload SDK, at its pin
 #                make                                  the native tool and libc.prx
@@ -29,7 +29,7 @@ set -euo pipefail
 
 ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
-parent=$(dirname "$root")
+parent=$(dirname "$(dirname "$root")")
 check=false
 rebuild_radv=false
 for argument in "$@"; do
@@ -155,3 +155,4 @@ the control payload from PS5_Vulkan:
     python3 tools/ps5_console.py deploy-payload, then load it with the console's payload loader
 Then: ps5/tools/build.sh && ps5/tools/deploy.sh && ps5/tools/run.sh
 EOF
+

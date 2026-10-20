@@ -28,7 +28,7 @@ from pathlib import Path
 
 PS5 = Path(__file__).resolve().parent.parent
 ROOT = PS5.parent
-VULKAN = Path(__import__("os").environ.get("PS5_VULKAN_DIR", ROOT.parent / "PS5_Vulkan")).resolve()
+VULKAN = Path(__import__("os").environ.get("PS5_VULKAN_DIR", ROOT.parent.parent / "PS5_Vulkan")).resolve()
 TITLE_ID = __import__("json").loads((PS5 / "sce_sys" / "param.json").read_text())["titleId"]
 
 PARAM = __import__("json").loads((PS5 / "sce_sys" / "param.json").read_text())

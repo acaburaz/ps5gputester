@@ -17,7 +17,7 @@ set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 file(READ ${CMAKE_CURRENT_SOURCE_DIR}/sce_sys/param.json param_json)
 string(JSON PS5_TITLE_NAME GET "${param_json}" localizedParameters en-US titleName)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS sce_sys/param.json)
-set(PS5_VULKAN_DIR "${ROOT}/../PS5_Vulkan" CACHE PATH "the PS5_Vulkan checkout (RADV archive, link recipe, packaging)")
+set(PS5_VULKAN_DIR "${ROOT}/../../PS5_Vulkan" CACHE PATH "the PS5_Vulkan checkout (RADV archive, link recipe, packaging)")
 # PS5_PAYLOAD_SDK: the SDK the toolchain file came from (tools/setup-sdk.sh's pin)
 # The host reference build: the same code on the PC's Vulkan driver, with a
 # headless surface, reading and writing in PS5_HOST_APP_ROOT (tools/host-reference.sh)

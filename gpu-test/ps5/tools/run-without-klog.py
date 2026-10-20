@@ -22,7 +22,7 @@ from ftplib import FTP, error_perm
 from pathlib import Path
 
 PS5 = Path(__file__).resolve().parent.parent
-VULKAN = Path(os.environ.get("PS5_VULKAN_DIR", PS5.parent.parent / "PS5_Vulkan")).resolve()
+VULKAN = Path(os.environ.get("PS5_VULKAN_DIR", PS5.parent.parent.parent / "PS5_Vulkan")).resolve()
 sys.path.insert(0, str(VULKAN / "tools"))
 import ps5_console  # noqa: E402
 

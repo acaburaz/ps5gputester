@@ -131,7 +131,7 @@ def main():
                 archive(Path(src["path"]) / sub, info["revision"], sname, out / "source" / f"{sname}.tar.gz")
                 sources.append((f"{sname}.tar.gz", f'{sub}, a submodule of the title', f'{info["remote"]} at {info["revision"]}'))
             if src.get("built_with_sdk"):
-                sdk = ROOT.parent / "PS5_PayloadSDK"
+                sdk = ROOT.parent.parent / "PS5_PayloadSDK"
                 sname = f'{p["id"]}-sdk-{src["built_with_sdk"][:12]}'
                 archive(sdk, src["built_with_sdk"], sname, out / "source" / f"{sname}.tar.gz")
                 sources.append((f"{sname}.tar.gz", "the payload SDK fork the RADV archive was built against",

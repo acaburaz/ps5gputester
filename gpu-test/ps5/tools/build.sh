@@ -7,7 +7,7 @@
 # changed, links with RADV and packages the title folder (tools/link-title.sh),
 # then lays the assets in (tools/build-assets.py).
 #
-#   PS5_VULKAN_DIR   the PS5_Vulkan checkout (default ../PS5_Vulkan): the RADV
+#   PS5_VULKAN_DIR   the PS5_Vulkan checkout (default ../../PS5_Vulkan): the RADV
 #                    release archive, the link recipe, the native tool and libc.prx
 #
 # The payload SDK is this title's own pin of my fork (tools/setup-sdk.sh).
@@ -20,7 +20,7 @@ set -euo pipefail
 
 ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
-vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}" && pwd)
+vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../../PS5_Vulkan}" && pwd)
 sdk=$(bash "$ps5/tools/setup-sdk.sh")
 build="$root/build/ps5"
 ninja=$(command -v ninja || echo "$HOME/.local/bin/ninja")

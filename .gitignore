@@ -2,9 +2,14 @@ build/
 dist/
 klog/
 .deps/
+gpu-test/build/
+gpu-test/dist/
+gpu-test/klog/
+gpu-test/.deps/
 imgui.ini
 __pycache__/
 *.pyc
 remote-eboot-verify.bin
-agc-mask-proxy/reference/*.sprx
-agc-mask-proxy/out/
+gpu-test/remote-eboot-verify.bin
+agc-driver/reference/*.sprx
+agc-driver/out/

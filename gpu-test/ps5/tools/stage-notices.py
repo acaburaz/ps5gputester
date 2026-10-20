@@ -29,6 +29,8 @@ from pathlib import Path
 
 PS5 = Path(__file__).resolve().parent.parent
 ROOT = PS5.parent
+REPO = ROOT.parent
+REPO_PREFIX = ROOT.name
 
 
 def git(repo, *args):
@@ -96,14 +98,14 @@ def main():
     parts = []
 
     # The title: its own code, the foundation and the libraries in its tree
-    rev, dirty, remote = revision(ROOT)
-    write_text(out / "title/LICENSE.md", ROOT, rev, "LICENSE.md")
+    rev, dirty, remote = revision(REPO)
+    write_text(out / "title/LICENSE.md", REPO, rev, "LICENSE.md")
     libraries = [("external/imgui/LICENSE.txt", "imgui-LICENSE.txt"), ("external/ktx/LICENSE.md", "ktx-LICENSE.md"),
                  ("external/ktx/NOTICE.md", "ktx-NOTICE.md"), ("external/tinygltf/LICENSE", "tinygltf-LICENSE"),
                  ("ps5/third_party/volk/LICENSE.md", "volk-LICENSE.md")]
     for path, dest in libraries:
-        write_text(out / "title" / dest, ROOT, rev, path)
-    glm = git(ROOT, "ls-tree", rev, "external/glm").split()[2]
+        write_text(out / "title" / dest, REPO, rev, f"{REPO_PREFIX}/{path}")
+    glm = git(REPO, "ls-tree", rev, f"{REPO_PREFIX}/external/glm").split()[2]
     parts.append(dict(
         id="title", name=f"{name}: its program, the foundation (Sascha Willems' Vulkan examples and base class, the PS5 layer) "
                          "and the libraries in its tree (Dear ImGui, libktx, tinygltf with stb_image and nlohmann json, "
@@ -112,12 +114,12 @@ def main():
                 "Apache-2.0 OR MIT (the Vulkan headers)",
         copyright=["Copyright (c) 2016-2026 Sascha Willems", "Copyright (C) 2026 Mihawk", "and each library's authors"],
         artifacts=["eboot.bin", "shaders/"], texts="licenses/title/",
-        source=dict(kind="git", path=str(ROOT), remote=remote, revision=rev, dirty=dirty,
-                    submodules={"external/glm": dict(remote="https://github.com/g-truc/glm", revision=glm)})))
+        source=dict(kind="git", path=str(REPO), remote=remote, revision=rev, dirty=dirty,
+                    submodules={f"{REPO_PREFIX}/external/glm": dict(remote="https://github.com/g-truc/glm", revision=glm)})))
 
     # The UI kit, in a title that has the module
     if (PS5 / "ui/setup-kit.sh").exists():
-        kit = Path(ROOT.parent / "PS5_VKHomebrewUI")
+        kit = Path(REPO.parent / "PS5_VKHomebrewUI")
         kit_rev = pinned("ui/setup-kit.sh", "revision")
         write_text(out / "ui-kit/LICENSE", kit, kit_rev, "LICENSE")
         parts.append(dict(
@@ -129,7 +131,7 @@ def main():
                         dirty=False)))
 
     # The payload SDK fork: its platform layer and headers
-    sdk = Path(ROOT.parent / "PS5_PayloadSDK")
+    sdk = Path(REPO.parent / "PS5_PayloadSDK")
     sdk_rev = pinned("tools/setup-sdk.sh", "sdk_revision")
     write_text(out / "platform/GPL-3.0.txt", sdk, sdk_rev, "LICENSE")
     write_text(out / "platform/musl-regex-COPYRIGHT.txt", sdk, sdk_rev, "platform/src/regex/COPYRIGHT.musl")
@@ -157,7 +159,7 @@ def main():
     provenance = (archive.parent.parent / "PROVENANCE.txt").read_text()
     mesa_rev = re.search(r"^revision: ([0-9a-f]{40})", provenance, re.M).group(1)
     radv_sdk = re.search(r"^sdk: ([0-9a-f]{40})", provenance, re.M)
-    mesa = Path(ROOT.parent / "PS5_Mesa")
+    mesa = Path(REPO.parent / "PS5_Mesa")
     write_text(out / "radv/Mesa-license.rst", mesa, mesa_rev, "docs/license.rst")
     write_tree(out / "radv/licenses", mesa, mesa_rev, "licenses")
     parts.append(dict(
@@ -169,7 +171,7 @@ def main():
                     dirty=False, built_with_sdk=radv_sdk.group(1) if radv_sdk else None)))
 
     # The LLVM runtime the SDK links in
-    llvm = ROOT.parent / "PS5_LLVM/llvm/LICENSE.TXT"
+    llvm = REPO.parent / "PS5_LLVM/llvm/LICENSE.TXT"
     if llvm.exists():
         (out / "llvm-runtime").mkdir()
         shutil.copy2(llvm, out / "llvm-runtime/LICENSE.TXT")

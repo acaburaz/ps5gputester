@@ -20,7 +20,7 @@
 set -euo pipefail
 ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
-vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}" && pwd)
+vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../../PS5_Vulkan}" && pwd)
 title_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' "$ps5/sce_sys/param.json")
 # klog's prefix: the title's name, as a regular expression
 prefix=$(python3 -c 'import json,re,sys; print(re.escape("[" + json.load(open(sys.argv[1]))["localizedParameters"]["en-US"]["titleName"] + "]"))' "$ps5/sce_sys/param.json")

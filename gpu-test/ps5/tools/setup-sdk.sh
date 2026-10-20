@@ -3,7 +3,7 @@
 #
 #   ps5/tools/setup-sdk.sh       install it into .deps/native/ps5-payload-sdk (once a revision)
 #
-# The SDK is my fork, ../PS5_PayloadSDK: the upstream release with the PS5
+# The SDK is my fork, ../../PS5_PayloadSDK: the upstream release with the PS5
 # platform layer (libps5platform.a, include/ps5platform) installed over it. The
 # pinned revision is exported with git archive, so a build never depends on the
 # fork's working tree, and the SDK directory records it, as PS5 RetroArch and
@@ -16,7 +16,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cache="$root/.deps/native"
 sdk="$cache/ps5-payload-sdk"
-sdk_fork="${PS5_PAYLOAD_SDK_FORK:-$root/../PS5_PayloadSDK}"
+sdk_fork="${PS5_PAYLOAD_SDK_FORK:-$root/../../PS5_PayloadSDK}"
 # 611893f: /data through the Lapy daemon (ps5platform/elevation.h), an opt-in no sample calls.
 # Never older than 6b63a2a, the platform layer's localeconv in the C locale (ps5_localeconv).
 sdk_revision=611893fc25ef3e138f5bc2c90d829d8b58174cd2

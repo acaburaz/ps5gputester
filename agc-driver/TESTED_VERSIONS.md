@@ -1,7 +1,7 @@
 # Astro driver test versions
 
 This file identifies console-tested driver states without redistributing Sony
-libraries. Keep the original SPRX locally under `agc-mask-proxy/reference/`;
+libraries. Keep the original SPRX locally under `agc-driver/reference/`;
 that directory and generated FSELF output are excluded from Git.
 
 ## Stock Astro driver baseline — 2026-10-20
@@ -29,7 +29,7 @@ docker run --rm `
   -v 'C:\Tools\Ps5tools\Y2JB\PS5_GPUMemoryTest:/work' `
   -v 'C:\Tools\Ps5tools\Y2JB\PS5_Vulkan:/vulkan' `
   -w /work ps5-gpu-test-builder-complete:latest `
-  bash -lc '/vulkan/build/host/ps5-native-tool self --sign --in agc-mask-proxy/reference/libSceAgcDriver-PPSA01325-original.sprx --out agc-mask-proxy/out/astro-original.fself --magic 0x1D3D154F'
+  bash -lc '/vulkan/build/host/ps5-native-tool self --sign --in agc-driver/reference/libSceAgcDriver-PPSA01325-original.sprx --out agc-driver/out/astro-original.fself --magic 0x1D3D154F'
 ```
 
 Upload `astro-original.fself` to
