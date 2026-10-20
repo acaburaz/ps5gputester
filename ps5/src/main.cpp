@@ -29,6 +29,7 @@
 #include <sys/stat.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <cstdarg>
 #include <fstream>
@@ -374,6 +375,22 @@ int main()
 	platform_init(PS5_TITLE_NAME);
 	// The samples report on std::cout and std::cerr: both reach klog
 	std::cout.rdbuf(std::cerr.rdbuf());
+
+#if !defined(PS5_HOST_REFERENCE)
+	/*
+	 * Diagnostic build: WGP 4 is the CU pair 8/9 on RDNA in WGP mode.
+	 * RADV applies AMD_CU_MASK to every shader array, so 0x0ff keeps
+	 * CU 0-7 enabled and excludes WGP 4 everywhere.  This must be set
+	 * before the driver is initialized and reads the GPU topology.
+	 */
+	const char *cuMask = "0x0ff";
+	if (setenv("AMD_CU_MASK", cuMask, 1) == 0) {
+		say("diagnostic CU mask requested: AMD_CU_MASK=%s; linked RADV enforces WGP 4 exclusion", cuMask);
+	} else {
+		say("WARNING: could not set AMD_CU_MASK; WGP 4 remains available");
+	}
+#endif
+
 	pad_open();
 #if defined(PS5_HOST_REFERENCE)
 	// The PC's Vulkan loader

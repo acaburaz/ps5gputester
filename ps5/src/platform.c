@@ -74,6 +74,16 @@ now_seconds(void)
    return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
 }
 
+void
+platform_emergency_exit(const char *reason)
+{
+   say("EMERGENCY EXIT: %s", reason ? reason : "requested");
+   fflush(NULL);
+   (void)sceSystemServiceLoadExec("exit", NULL);
+   for (;;)
+      sceKernelUsleep(100000);
+}
+
 /* The title ends by asking the shell to close it. exit() and returning from
  * _start both kill it, and the console then reports a crash over a run that
  * worked. The CRT calls this after main returns; the shell closes the title

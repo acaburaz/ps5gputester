@@ -1,140 +1,33 @@
-/* Deterministic PS5 GPU compute and device-local memory test. SPDX-License-Identifier: MIT */
 #include "vulkanexamplebase.h"
-#include <algorithm>
+#include <array>
+#include <chrono>
 #include <fstream>
+#include <random>
 #include <sstream>
-
-class VulkanExample : public VulkanExampleBase {
-public:
-	struct Push { uint32_t count, base, seed, rounds; };
-	VkDescriptorSetLayout setLayout{VK_NULL_HANDLE};
-	VkDescriptorSet set{VK_NULL_HANDLE};
-	VkPipelineLayout computeLayout{VK_NULL_HANDLE};
-	VkPipeline computePipeline{VK_NULL_HANDLE};
-	VkCommandPool computePool{VK_NULL_HANDLE};
-	VkQueue computeQueue{VK_NULL_HANDLE};
-	std::vector<std::string> lines;
-	uint32_t totalErrors{0};
-	bool finished{false};
-
-	VulkanExample() : VulkanExampleBase() {
-		title = "GPU Memory Test";
-		apiVersion = VK_API_VERSION_1_3;
-		useDynamicRendering = true;
-		requiresStencil = true;
-		deviceCreatepNextChain = &baseDynamicRenderingFeatures;
-	}
-
-	~VulkanExample() {
-		if (!device) return;
-		vkDeviceWaitIdle(device);
-		vkDestroyPipeline(device, computePipeline, nullptr);
-		vkDestroyPipelineLayout(device, computeLayout, nullptr);
-		vkDestroyDescriptorSetLayout(device, setLayout, nullptr);
-		vkDestroyCommandPool(device, computePool, nullptr);
-	}
-
-	static uint32_t expected(uint32_t index, uint32_t seed, uint32_t rounds) {
-		uint32_t value = index ^ seed;
-		for (uint32_t round = 0; round < rounds; ++round) {
-			value ^= value >> 16; value *= 0x7feb352du;
-			value ^= value >> 15; value *= 0x846ca68bu;
-			value ^= value >> 16; value += 0x9e3779b9u + round;
-		}
-		return value;
-	}
-
-	void log(const std::string& line) {
-		std::cout << "[GPU-TEST] " << line << std::endl;
-		lines.push_back(line);
-#if defined(__PROSPERO__)
-		std::ofstream output("/app0/gpu-memory-test.log", std::ios::app);
-#else
-		std::ofstream output("gpu-memory-test.log", std::ios::app);
-#endif
-		output << line << "\n";
-	}
-
-	void prepareCompute() {
-		vkGetDeviceQueue(device, vulkanDevice->queueFamilyIndices.compute, 0, &computeQueue);
-		VkCommandPoolCreateInfo poolInfo = vks::initializers::commandPoolCreateInfo();
-		poolInfo.queueFamilyIndex = vulkanDevice->queueFamilyIndices.compute;
-		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		VK_CHECK_RESULT(vkCreateCommandPool(device, &poolInfo, nullptr, &computePool));
-		std::vector<VkDescriptorPoolSize> sizes = {vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1)};
-		VkDescriptorPoolCreateInfo pool = vks::initializers::descriptorPoolCreateInfo(sizes, 1);
-		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &pool, nullptr, &descriptorPool));
-		std::vector<VkDescriptorSetLayoutBinding> bindings = {
-			vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT, 0)};
-		VkDescriptorSetLayoutCreateInfo setInfo = vks::initializers::descriptorSetLayoutCreateInfo(bindings);
-		VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &setLayout));
-		VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push)};
-		VkPipelineLayoutCreateInfo layoutInfo = vks::initializers::pipelineLayoutCreateInfo(&setLayout, 1);
-		layoutInfo.pushConstantRangeCount = 1; layoutInfo.pPushConstantRanges = &range;
-		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &computeLayout));
-		VkDescriptorSetAllocateInfo alloc = vks::initializers::descriptorSetAllocateInfo(descriptorPool, &setLayout, 1);
-		VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &alloc, &set));
-		VkComputePipelineCreateInfo pipelineInfo = vks::initializers::computePipelineCreateInfo(computeLayout, 0);
-		pipelineInfo.stage = loadShader(getShadersPath() + "gpumemorytest/stress.comp.spv", VK_SHADER_STAGE_COMPUTE_BIT);
-		VK_CHECK_RESULT(vkCreateComputePipelines(device, pipelineCache, 1, &pipelineInfo, nullptr, &computePipeline));
-	}
-
-	void runStage(uint32_t mib, uint32_t rounds, bool verifyAll) {
-		const VkDeviceSize bytes = VkDeviceSize(mib) * 1024 * 1024;
-		const uint32_t count = uint32_t(bytes / 4);
-		const uint32_t seed = 0x51f15e5du ^ mib ^ (rounds << 16);
-		vks::Buffer gpu, readback;
-		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &gpu, bytes));
-		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &readback, bytes));
-		VkDescriptorBufferInfo bufferInfo{gpu.buffer, 0, bytes};
-		VkWriteDescriptorSet write = vks::initializers::writeDescriptorSet(set, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 0, &bufferInfo);
-		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
-		VkCommandBufferAllocateInfo commandAlloc = vks::initializers::commandBufferAllocateInfo(computePool, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-		VkCommandBuffer command; VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &commandAlloc, &command));
-		VkCommandBufferBeginInfo begin = vks::initializers::commandBufferBeginInfo(); VK_CHECK_RESULT(vkBeginCommandBuffer(command, &begin));
-		vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
-		vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, computeLayout, 0, 1, &set, 0, nullptr);
-		const uint32_t perDispatch = 65535u * 256u;
-		for (uint32_t base = 0; base < count; base += perDispatch) {
-			uint32_t part = std::min(perDispatch, count - base); Push push{count, base, seed, rounds};
-			vkCmdPushConstants(command, computeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
-			vkCmdDispatch(command, (part + 255u) / 256u, 1, 1);
-		}
-		VkBufferMemoryBarrier barrier = vks::initializers::bufferMemoryBarrier();
-		barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT; barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-		barrier.buffer = gpu.buffer; barrier.size = bytes;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED; barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &barrier, 0, nullptr);
-		VkBufferCopy copy{0, 0, bytes}; vkCmdCopyBuffer(command, gpu.buffer, readback.buffer, 1, &copy);
-		VK_CHECK_RESULT(vkEndCommandBuffer(command));
-		VkFence fence; VkFenceCreateInfo fenceInfo = vks::initializers::fenceCreateInfo(); VK_CHECK_RESULT(vkCreateFence(device, &fenceInfo, nullptr, &fence));
-		VkSubmitInfo submit = vks::initializers::submitInfo(); submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
-		VK_CHECK_RESULT(vkQueueSubmit(computeQueue, 1, &submit, fence)); VK_CHECK_RESULT(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
-		VK_CHECK_RESULT(readback.map()); const uint32_t* values = static_cast<const uint32_t*>(readback.mapped);
-		uint32_t errors = 0, stride = verifyAll ? 1u : std::max(1u, count / 16384u);
-		for (uint32_t i = 0; i < count; i += stride) if (values[i] != expected(i, seed, rounds)) {
-			if (errors < 16) { std::ostringstream s; s << "ERROR stage=" << mib << "MiB offset=0x" << std::hex << uint64_t(i)*4 << " expected=" << expected(i,seed,rounds) << " actual=" << values[i]; log(s.str()); }
-			++errors;
-		}
-		readback.unmap(); totalErrors += errors;
-		std::ostringstream summary; summary << "stage=" << mib << "MiB rounds=" << rounds << " checked=" << ((count+stride-1)/stride) << " verdict=" << (errors?"FAIL":"PASS") << " errors=" << errors; log(summary.str());
-		vkDestroyFence(device, fence, nullptr); vkFreeCommandBuffers(device, computePool, 1, &command); gpu.destroy(); readback.destroy();
-	}
-
-	void prepare() override {
-		VulkanExampleBase::prepare(); prepareCompute(); log("BEGIN deterministic GPU test");
-		runStage(64,4,true); runStage(128,4,true); runStage(256,4,true); runStage(64,512,false);
-		log(totalErrors ? "FINAL verdict=FAIL" : "FINAL verdict=PASS"); finished=true; prepared=true;
-	}
-	void buildCommandBuffer() {
-		VkCommandBuffer cmd=drawCmdBuffers[currentBuffer]; VkCommandBufferBeginInfo begin=vks::initializers::commandBufferBeginInfo();
-		VK_CHECK_RESULT(vkBeginCommandBuffer(cmd,&begin)); beginDynamicRendering(cmd); drawUI(cmd); endDynamicRendering(cmd); VK_CHECK_RESULT(vkEndCommandBuffer(cmd));
-	}
-	void render() override { if(!prepared)return; VulkanExampleBase::prepareFrame(); buildCommandBuffer(); VulkanExampleBase::submitFrame(); }
-	void OnUpdateUIOverlay(vks::UIOverlay* overlay) override {
-		if(overlay->header("Deterministic GPU test")){ overlay->text(finished?(totalErrors?"FAIL":"PASS"):"RUNNING"); for(const auto& line:lines) overlay->text("%s",line.c_str()); if(overlay->button("Quit"))quit=true; }
-	}
-};
-VULKAN_EXAMPLE_MAIN()
+extern "C" int sceKernelGetCpuTemperature(int*);
+extern "C" int sceKernelGetSocSensorTemperature(int,int*);
+class VulkanExample:public VulkanExampleBase{public:
+ struct U{glm::mat4 vp;glm::vec4 timeLoad;glm::mat4 model[27];glm::ivec4 home[27];}u{};
+ struct C{glm::ivec3 p,h;glm::mat4 r{1};};struct M{int a,l,d;};
+ VkDescriptorSetLayout sl{};VkPipelineLayout pl{};VkPipeline pipe{};std::array<vks::Buffer,maxConcurrentFrames>buf;std::array<VkDescriptorSet,maxConcurrentFrames>set{};std::array<C,27>cube{};std::vector<M>scramble;std::vector<vks::Buffer*>memory;
+ float t{},moveTime{},stats{},frames{},nextMemory{20},nextTemp{};int cpuTemp{-1};std::array<int,8>socTemp{{-1,-1,-1,-1,-1,-1,-1,-1}};int stage{-1},moveIndex{};bool solving{true};std::vector<std::string>lines;std::mt19937 rng;
+ const char*names[6]={"12 lights, 1 pass","32 lights, 2 passes","64 lights, 3 passes","96 reflections, 4 passes","128 reflections, 6 passes","192 reflections, 8 passes"};
+ VulkanExample():VulkanExampleBase(),rng((uint32_t)std::chrono::high_resolution_clock::now().time_since_epoch().count()){title="Rubik GPU Stress";apiVersion=VK_API_VERSION_1_3;useDynamicRendering=true;requiresStencil=true;deviceCreatepNextChain=&baseDynamicRenderingFeatures;camera.type=Camera::CameraType::lookat;camera.setPosition({0,0,-6.2f});camera.setRotation({-18,28,0});camera.setPerspective(45,(float)width/height,.1f,64);}
+ ~VulkanExample(){if(device){vkDeviceWaitIdle(device);for(auto*b:memory){b->destroy();delete b;}vkDestroyPipeline(device,pipe,0);vkDestroyPipelineLayout(device,pl,0);vkDestroyDescriptorSetLayout(device,sl,0);for(auto&b:buf)b.destroy();}}
+ std::string mn(M m){const char*face=m.a==0?(m.l>0?"R":"L"):m.a==1?(m.l>0?"U":"D"):(m.l>0?"F":"B");return std::string(face)+(m.d<0?"'":"");}
+ void log(std::string s){std::cout<<"[RUBIK] "<<s<<std::endl;lines.push_back(s);if(lines.size()>15)lines.erase(lines.begin());std::ofstream f("/app0/gpu-memory-test.log",std::ios::app);f<<s<<"\n";}
+ glm::mat4 rot(M m,float q=1){glm::vec3 a(0);a[m.a]=1;return glm::rotate(glm::mat4(1),glm::radians(90.f*m.d*q),a);}
+ void apply(M m){auto r=rot(m);for(auto&x:cube)if(x.p[m.a]==m.l){x.p=glm::ivec3(glm::round(glm::mat3(r)*glm::vec3(x.p)));x.r=r*x.r;}}
+ M current(){M m=scramble[scramble.size()-1-moveIndex];m.d=-m.d;return m;}
+ void initCube(){scramble.clear();moveIndex=0;moveTime=0;solving=true;int i=0;for(int z=-1;z<2;z++)for(int y=-1;y<2;y++)for(int x=-1;x<2;x++){cube[i].p=cube[i].h={x,y,z};cube[i].r=glm::mat4(1);i++;}std::uniform_int_distribution<int>a(0,2),d(0,1),side(0,1);M prev{-1,0,0};for(int n=0;n<16;n++){M m;do{m={a(rng),side(rng)?1:-1,d(rng)?1:-1};}while(m.a==prev.a&&m.l==prev.l);scramble.push_back(m);apply(m);prev=m;}std::ostringstream s;s<<"SCRAMBLE new_stage random_moves=16 sequence=";for(auto m:scramble)s<<mn(m)<<' ';log(s.str());log("SOLVE begin animated inverse moves=16 seconds_per_move=0.9");}
+ void allocateMemory(){if(memory.size()>=64)return;auto*b=new vks::Buffer;VkDeviceSize bytes=256ull*1024*1024;VkResult r=vulkanDevice->createBuffer(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,b,bytes);if(r==VK_SUCCESS){VkCommandBuffer commit=vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY,true);vkCmdFillBuffer(commit,b->buffer,0,bytes,0xA55A33CCu);vulkanDevice->flushCommandBuffer(commit,queue);memory.push_back(b);std::ostringstream s;s<<"MEMORY retained="<<memory.size()*256<<"MiB chunks="<<memory.size()<<" committed=YES status=OK";log(s.str());}else{delete b;std::ostringstream s;s<<"MEMORY allocation_failed requested_total="<<(memory.size()+1)*256<<"MiB VkResult="<<r;log(s.str());nextMemory=1e9f;}}
+ void setup(){for(auto&b:buf){VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,&b,sizeof(U),&u));VK_CHECK_RESULT(b.map());}std::vector<VkDescriptorPoolSize>ps={vks::initializers::descriptorPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,maxConcurrentFrames)};auto dp=vks::initializers::descriptorPoolCreateInfo(ps,maxConcurrentFrames);VK_CHECK_RESULT(vkCreateDescriptorPool(device,&dp,0,&descriptorPool));std::vector<VkDescriptorSetLayoutBinding>bs={vks::initializers::descriptorSetLayoutBinding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0)};auto dl=vks::initializers::descriptorSetLayoutCreateInfo(bs);VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device,&dl,0,&sl));auto ai=vks::initializers::descriptorSetAllocateInfo(descriptorPool,&sl,1);for(int i=0;i<maxConcurrentFrames;i++){VK_CHECK_RESULT(vkAllocateDescriptorSets(device,&ai,&set[i]));auto w=vks::initializers::writeDescriptorSet(set[i],VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,0,&buf[i].descriptor);vkUpdateDescriptorSets(device,1,&w,0,0);}auto li=vks::initializers::pipelineLayoutCreateInfo(&sl,1);VK_CHECK_RESULT(vkCreatePipelineLayout(device,&li,0,&pl));
+ auto ia=vks::initializers::pipelineInputAssemblyStateCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,0,VK_FALSE);auto rs=vks::initializers::pipelineRasterizationStateCreateInfo(VK_POLYGON_MODE_FILL,VK_CULL_MODE_NONE,VK_FRONT_FACE_COUNTER_CLOCKWISE,0);auto ba=vks::initializers::pipelineColorBlendAttachmentState(15,VK_FALSE);auto cb=vks::initializers::pipelineColorBlendStateCreateInfo(1,&ba);auto ds=vks::initializers::pipelineDepthStencilStateCreateInfo(VK_TRUE,VK_TRUE,VK_COMPARE_OP_LESS_OR_EQUAL);auto vs=vks::initializers::pipelineViewportStateCreateInfo(1,1,0);auto ms=vks::initializers::pipelineMultisampleStateCreateInfo(VK_SAMPLE_COUNT_1_BIT,0);std::vector<VkDynamicState>d={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};auto dy=vks::initializers::pipelineDynamicStateCreateInfo(d);VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};std::array<VkPipelineShaderStageCreateInfo,2>sh={loadShader(getShadersPath()+"gpumemorytest/model.vert.spv",VK_SHADER_STAGE_VERTEX_BIT),loadShader(getShadersPath()+"gpumemorytest/model.frag.spv",VK_SHADER_STAGE_FRAGMENT_BIT)};VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};ri.colorAttachmentCount=1;ri.pColorAttachmentFormats=&swapChain.colorFormat;ri.depthAttachmentFormat=depthFormat;ri.stencilAttachmentFormat=depthFormat;VkGraphicsPipelineCreateInfo pi{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};pi.pNext=&ri;pi.stageCount=2;pi.pStages=sh.data();pi.pVertexInputState=&vi;pi.pInputAssemblyState=&ia;pi.pViewportState=&vs;pi.pRasterizationState=&rs;pi.pMultisampleState=&ms;pi.pDepthStencilState=&ds;pi.pColorBlendState=&cb;pi.pDynamicState=&dy;pi.layout=pl;VK_CHECK_RESULT(vkCreateGraphicsPipelines(device,pipelineCache,1,&pi,0,&pipe));}
+ void readTemps(){std::ifstream f("/data/homebrew/PPSA99361/telemetry.txt");if(f)f>>cpuTemp>>socTemp[0];std::ostringstream s;s<<"THERMAL cpu="<<cpuTemp<<"C soc_apu="<<socTemp[0]<<"C source=daemon";log(s.str());}
+ void update(){if(t>=nextTemp){readTemps();nextTemp=t+2;}int ns=std::min(5,int(t/20));if(ns!=stage){bool restart=stage>=0;stage=ns;if(restart)initCube();std::ostringstream s;s<<"GRAPHICS stage="<<stage<<" feature="<<names[stage];log(s.str());}while(t>=nextMemory){allocateMemory();nextMemory+=20;}if(solving){moveTime+=frameTimer;if(moveTime>=.9f){M m=current();apply(m);std::ostringstream s;s<<"SOLVE complete="<<moveIndex+1<<"/16 move="<<mn(m);log(s.str());moveTime-=.9f;if(++moveIndex==(int)scramble.size()){solving=false;bool ok=true;for(auto&x:cube)ok&=x.p==x.h;log(ok?"SOLVE verdict=PASS cube_restored=true; continuing stress":"SOLVE verdict=FAIL");}}}
+ bool hot=(cpuTemp>=90||socTemp[0]>=90);int it[]={12,32,64,96,128,192},copies[]={1,2,3,4,6,8};if(hot){it[stage]=64;copies[stage]=2;}u.vp=camera.matrices.perspective*camera.matrices.view*glm::rotate(glm::mat4(1),t*.12f,glm::normalize(glm::vec3(.2,1,.1)));u.timeLoad={t,(float)it[stage],(float)copies[stage],(float)stage};M active{};if(solving)active=current();float q=solving?std::min(1.f,moveTime/.9f):0;q=q*q*(3-2*q);for(int i=0;i<27;i++){auto&x=cube[i];glm::mat4 model=glm::translate(glm::mat4(1),glm::vec3(x.p)*1.04f)*x.r;if(solving&&x.p[active.a]==active.l)model=rot(active,q)*model;u.model[i]=model*glm::scale(glm::mat4(1),glm::vec3(.91f));u.home[i]=glm::ivec4(x.h,0);}memcpy(buf[currentBuffer].mapped,&u,sizeof(u));}
+ void command(){auto c=drawCmdBuffers[currentBuffer];auto bi=vks::initializers::commandBufferBeginInfo();VK_CHECK_RESULT(vkBeginCommandBuffer(c,&bi));beginDynamicRendering(c);auto vp=vks::initializers::viewport((float)width,(float)height,0,1);vkCmdSetViewport(c,0,1,&vp);auto sc=vks::initializers::rect2D(width,height,0,0);vkCmdSetScissor(c,0,1,&sc);vkCmdBindPipeline(c,VK_PIPELINE_BIND_POINT_GRAPHICS,pipe);vkCmdBindDescriptorSets(c,VK_PIPELINE_BIND_POINT_GRAPHICS,pl,0,1,&set[currentBuffer],0,0);int grid=24;int fur=(stage+1)*grid*grid;for(int i=0;i<(int)u.timeLoad.z;i++)vkCmdDraw(c,36,27+fur,0,0);drawUI(c);endDynamicRendering(c);VK_CHECK_RESULT(vkEndCommandBuffer(c));}
+ void prepare()override{VulkanExampleBase::prepare();setup();initCube();log("BEGIN indefinite 3D Rubik GPU and memory stress target=16384MiB emergency_exit=L1+R1+OPTIONS");update();prepared=true;}
+ void render()override{if(!prepared)return;VulkanExampleBase::prepareFrame();t+=frameTimer;stats+=frameTimer;frames++;update();if(stats>=5){std::ostringstream s;int grid=24,fur=(stage+1)*grid*grid,passes=(int)u.timeLoad.z,iters=(int)u.timeLoad.y;long long verts=36ll*(27+fur)*passes;s<<"PERF seconds="<<int(t)<<" fps="<<int(frames/stats+.5f)<<" frame_ms="<<1000*stats/frames<<" stage="<<stage<<" fur_fibers="<<fur<<" draw_passes="<<passes<<" vertices_per_frame="<<verts<<" fragment_iterations="<<iters<<" retained_memory="<<memory.size()*256<<"MiB solve="<<moveIndex<<"/16 cpu="<<cpuTemp<<"C soc_apu="<<socTemp[0]<<"C";log(s.str());stats=frames=0;}command();VulkanExampleBase::submitFrame();}
+ void OnUpdateUIOverlay(vks::UIOverlay*o)override{if(o->header("Rubik GPU + memory stress")){o->text("EMERGENCY EXIT: hold L1 + R1 + OPTIONS");o->text("ACTIVE SETTINGS");o->text("Stage %d / 5",stage);o->text("Lighting: %s",names[stage]);o->text("Light/reflection iterations: %d",(int)u.timeLoad.y);o->text("Full cube draw copies: %d",(int)u.timeLoad.z);o->text("Cubies per copy: 27");o->text("Fur coverage: %d complete side(s)",stage+1);o->text("Fur grid per side: 24 x 24");o->text("Total fur fibers: %d",(stage+1)*576);o->text("CPU temperature: %d C",cpuTemp);o->text("SoC/APU temperature: %d C",socTemp[0]);o->text("Thermal throttle: %s",(cpuTemp>=90||socTemp[0]>=90)?"ACTIVE":"ready (CPU 90 / SoC 90 C)");for(int i=1;i<8;i++)if(socTemp[i]>=0)o->text("SoC sensor %d: %d C",i,socTemp[i]);o->text("Animation: random 16-move inverse solve");o->text("Solve progress: %d / 16",moveIndex);o->text("Committed GPU memory: %d / 16384 MiB",(int)memory.size()*256);o->text("Memory step: +256 MiB every 20 sec");o->text("FPS %.0f | frame %.2f ms",stats>0?frames/stats:0,frames>0?1000*stats/frames:0);}}
+};VULKAN_EXAMPLE_MAIN()

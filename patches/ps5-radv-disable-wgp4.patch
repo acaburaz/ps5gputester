@@ -1,0 +1,12 @@
+diff --git a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
+--- a/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
++++ b/src/amd/vulkan/winsys/ps5/radv_ps5_winsys.c
+@@ -302,6 +302,11 @@ radv_ps5_describe_gpu(struct radeon_info *info, bool compiler_compat_mode)
+ {
+    radv_ps5_fill_info(info, compiler_compat_mode, 3, 0xa0300, RADV_PS5_EXTERNAL_REV);
++   /* Diagnostic build: exclude RDNA WGP 4 (CU pair 8/9) in every shader
++    * array. The PS5 winsys bypasses ac_query_gpu_info's AMD_CU_MASK parser. */
++   info->spi_cu_en = 0x0ff;
++   info->spi_cu_en_has_effect = true;
++
+    snprintf(info->marketing_name, sizeof(info->marketing_name), "PlayStation 5 GPU");

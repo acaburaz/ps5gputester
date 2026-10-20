@@ -74,6 +74,14 @@ void VulkanExampleBase::ps5HandleInput()
 {
 	struct pad &pad = ps5_pad();
 	pad_poll(&pad);
+	// A stress workload can make normal Vulkan shutdown wait forever for an
+	// overloaded queue. Hold this chord until the next input poll to ask the
+	// shell to terminate the title immediately, before another frame submits.
+	constexpr uint32_t emergencyExitChord = PAD_L1 | PAD_R1 | PAD_OPTIONS;
+	if ((pad.held & emergencyExitChord) == emergencyExitChord) {
+		pad_vibrate(0.35f, 0.7f);
+		platform_emergency_exit("L1+R1+OPTIONS held");
+	}
 	// No imgui.ini: window positions are not kept between runs
 	ImGui::GetIO().IniFilename = nullptr;
 	if (ps5.frameBudget) {

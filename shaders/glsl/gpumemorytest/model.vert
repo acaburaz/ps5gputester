@@ -1,29 +1,4 @@
 #version 450
-// Starter - the model's vertices in world space, its normals and texture coordinates.
-// Copyright (C) 2026 Mihawk - MIT
-
-layout (location = 0) in vec3 inPos;
-layout (location = 1) in vec3 inNormal;
-layout (location = 2) in vec2 inUV;
-
-layout (set = 0, binding = 0) uniform UBO
-{
-	mat4 projection;
-	mat4 view;
-	mat4 model;
-	vec4 lightDirection;
-	vec4 cameraPosition;
-} ubo;
-
-layout (location = 0) out vec3 outWorldPos;
-layout (location = 1) out vec3 outNormal;
-layout (location = 2) out vec2 outUV;
-
-void main()
-{
-	vec4 world = ubo.model * vec4(inPos, 1.0);
-	outWorldPos = world.xyz;
-	outNormal = mat3(ubo.model) * inNormal;
-	outUV = inUV;
-	gl_Position = ubo.projection * ubo.view * world;
-}
+layout(set=0,binding=0)uniform U{mat4 vp;vec4 tl;mat4 model[27];ivec4 home[27];}u;layout(location=0)out vec3 wp;layout(location=1)flat out vec3 ln;layout(location=2)out vec3 wn;layout(location=3)flat out ivec3 home;layout(location=4)flat out int fur;
+const vec2 q[6]=vec2[6](vec2(-1,-1),vec2(1,-1),vec2(1,1),vec2(-1,-1),vec2(1,1),vec2(-1,1));const vec3 n[6]=vec3[6](vec3(1,0,0),vec3(-1,0,0),vec3(0,1,0),vec3(0,-1,0),vec3(0,0,1),vec3(0,0,-1));const vec3 a[6]=vec3[6](vec3(0,1,0),vec3(0,1,0),vec3(1,0,0),vec3(1,0,0),vec3(1,0,0),vec3(1,0,0));const vec3 b[6]=vec3[6](vec3(0,0,1),vec3(0,0,-1),vec3(0,0,-1),vec3(0,0,1),vec3(0,1,0),vec3(0,-1,0));
+void main(){int f=gl_VertexIndex/6,i=gl_InstanceIndex;vec2 z=q[gl_VertexIndex%6];vec3 p=(n[f]+a[f]*z.x+b[f]*z.y)*.5;if(i<27){vec4 w=u.model[i]*vec4(p,1);wp=w.xyz;ln=n[f];wn=mat3(u.model[i])*n[f];home=u.home[i].xyz;fur=0;gl_Position=u.vp*w;}else{int id=i-27,grid=24,perFace=grid*grid,face=(id/perFace)%6,k=id%perFace,gx=k%grid,gy=k/grid;float denom=float(grid-1);float x=(float(gx)/denom-.5)*3.04,y=(float(gy)/denom-.5)*3.04;float wave=sin(float(id)*12.9898+u.tl.x*3.)*.035;vec3 normal=n[face],center=normal*(1.58+wave)+a[face]*x+b[face]*y;vec3 local=a[face]*p.x*.042+b[face]*p.y*.042+normal*p.z*(.13+.045*sin(float(id)*.71+u.tl.x*4.));vec3 pos=center+local;wp=pos;ln=n[f];wn=normalize(normal+n[f]*.18);home=ivec3(0);fur=1;gl_Position=u.vp*vec4(pos,1);}}

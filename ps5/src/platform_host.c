@@ -13,6 +13,7 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -45,6 +46,14 @@ now_seconds(void)
    struct timespec t;
    clock_gettime(CLOCK_MONOTONIC, &t);
    return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+}
+
+void
+platform_emergency_exit(const char *reason)
+{
+   fprintf(stderr, "EMERGENCY EXIT: %s\n", reason ? reason : "requested");
+   fflush(stderr);
+   exit(0);
 }
 
 bool

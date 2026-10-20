@@ -23,6 +23,10 @@ void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
 double now_seconds(void);
 
+/* Immediately ask the shell to close the title, without waiting for GPU idle.
+ * This is for a stress test whose GPU queue may no longer drain. */
+void platform_emergency_exit(const char *reason) __attribute__((noreturn));
+
 /* The pad, in the console's button numbering. */
 enum {
    PAD_L3 = 0x000002,

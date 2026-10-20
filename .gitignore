@@ -3,3 +3,6 @@ dist/
 klog/
 .deps/
 imgui.ini
+__pycache__/
+*.pyc
+remote-eboot-verify.bin

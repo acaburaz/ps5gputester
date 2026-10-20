@@ -1,6 +1,6 @@
 # GPU Memory Test
 
-A PS5 homebrew title (`PPSA99361`) on RADV, made from the
+A PS5 homebrew title (`PPSA99361`) that progressively stresses graphics, device-local memory and thermals on RADV. It renders and solves a scrambled 3D Rubik-style cube, adds lighting, fur and draw passes every 20 seconds, retains 256 MiB memory chunks, and writes performance and temperature telemetry to klog. It was made from the
 [PS5 Vulkan Template](https://github.com/mihawk-99/PS5_VulkanTemplate) foundation at
 `91179df7`: Sascha Willems' Vulkan example base class with its PS5 hooks, the PS5 layer
 (the launch, the pad, klog, test runs, the build and the console tools), and one
@@ -20,9 +20,15 @@ ps5/tools/run.sh --menu         # no test: the program, until it ends itself
 ps5/tools/host-reference.sh     # the same frames on this PC's Vulkan driver
 ```
 
-A launch from the home screen starts the program at once. The sticks move the camera,
-OPTIONS or the touch pad shows and hides the settings window, the D-pad and CROSS
-change them, and its Quit ends the title.
+A launch from the home screen starts the program at once. The overlay shows the active stage, load, memory, temperatures and the emergency-exit chord. Hold **L1 + R1 + OPTIONS** to ask the shell to terminate the title immediately without waiting for an overloaded Vulkan queue to become idle. Keep the chord held until the next controller poll when frames are very slow.
+
+## Diagnostic WGP mask
+
+The test can be linked with a diagnostic RADV build that sets `spi_cu_en=0x0ff` in the PS5 winsys before pipelines are created. On the tested RDNA topology this excludes the CU 8/9 position associated with WGP 4 in every shader array. See [`patches/ps5-radv-disable-wgp4.patch`](patches/ps5-radv-disable-wgp4.patch). This broad mask is for diagnosis; it does not modify the console globally or affect games using Sony's native AGC stack.
+
+## AGC proxy experiment
+
+[`agc-mask-proxy/README.md`](agc-mask-proxy/README.md) records the first, logging-only design for a `libSceAgcDriver` submission proxy. It must audit real DCB packets and prove forwarding before any CU-mask field is rewritten.
 
 ## Growing it
 
