@@ -1,0 +1,8 @@
+PS5 FurMark stable load
+fullscreen 3840x2160, original fur.jpg / noise.png / wall.jpg
+64 march steps, 1 sample
+4x AA measured at 51 ms (20 fps); not used
+a second fullscreen pass measured at 26 ms (38 fps); not used
+6 CPU burn threads, still 60 fps
+eboot.elf 26617336 01634a6a6b7e891a1f986a0e22c378539fc81dcab10c63f419b2beaceb48debd
+eboot.bin 26188877 e17a80c7ff41c6b7f07732a44aef1aa9436ac81209d4bb2c258cb443c1c20861
