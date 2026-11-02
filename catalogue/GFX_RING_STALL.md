@@ -97,18 +97,18 @@ The 1.6 GHz service and `gpu_recovery=0` exist only in this Linux boot. On the P
 
 A one-shot write before a title starts is not enough. The shell raises the GPU clock when the title enters its boosted mode. A wrapper has to hold the graphics clock at 1.6 GHz for the whole time the title runs, and it has to survive the firmware path that pairs CPU boost with a 2.23 GHz GPU ceiling.
 
-`/dev/mp1` is the documented SMU device, and `MP1_IOCTL_SET_GFXCLK` (`0x8004AE17`) is the documented graphics-clock command. Neither has been called on this console. The AGC submit-mask proxy in `agc-driver/` does not set a clock, and masking WGP bits in command buffers was already shown to move the fault rather than remove it.
+`/dev/mp1` is the SMU device ShellCore uses. `MP1_IOCTL_GET_CLK` (`0x406cae01`) returns the clock table. `gfxclk` is the 32-bit word at byte offset `0x54`: 900 at home, 2230 while a native title is boosted. `MP1_IOCTL_SET_GFXCLK` (`0x8004ae17`) takes that value in MHz. Writes of 1800 and 1200 were read back at those values during the Astro tests. Those lower clocks did not move the WGP4 fault, so this holder is for the 2.0 GHz ring stall, not a substitute for leaving WGP 4 fused off. The AGC submit-mask proxy does not set a clock.
 
-## Next wrapper
+## Holder
 
-The wrapper is a holder around a native PS5 title, not another Linux sysfs unit.
+`gpu-hold-1600.elf` is the holder. Source is [`gpu-hold-1600.c`](gpu-hold-1600.c). Load it from the payload manager and leave it running, then start the game.
 
-It needs to:
+- Every 50 ms it reads `gfxclk`.
+- When the value is above 1600 it writes 1600 and reads it back.
+- A home clock of 900 is left alone.
+- The first clamp posts the seen value and the readback.
+- If the readback stays above 1600 for 20 clamps, firmware is ignoring the graphics write. The holder then sends `MP1_IOCTL_SET_COREPSTATE` (`0x8008ae1d`) once, core and p-state 5, which is 1.6 GHz on the high-to-low CPU table.
+- `/data/gpu-hold-1600.bin` stores the last seen clock, the last readback, the clamp count, and the override count.
+- It stops after 6 hours. It does not edit command buffers and it does not turn WGP 4 on.
 
-- Request 1.6 GHz on the graphics clock before the title submits work.
-- Re-apply that request for as long as the title runs, including after the system enters boosted game mode.
-- Keep the CPU out of the 3.3–3.5 GHz band if a measurement shows that band lifting the GPU back to 2.23 GHz.
-- Leave WGP 4 fused off. Do not reuse the AGC DCB mask as the clock control.
-- Report the clock it actually read back, so a silent firmware override is visible.
-
-Until that holder exists, a PS5 game on the PS5 menu still asks for the high graphics clock and can still crash there.
+The Linux 1.6 GHz service still does not apply on the PS5 menu. This payload is the path that does.
