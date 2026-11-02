@@ -112,3 +112,5 @@ A one-shot write before a title starts is not enough. The shell raises the GPU c
 - It stops after 6 hours. It does not edit command buffers and it does not turn WGP 4 on.
 
 The Linux 1.6 GHz service still does not apply on the PS5 menu. This payload is the path that does.
+
+On the PS5 menu, with the holder left running, Astro's Playroom (`PPSA01325`) passed the splash and reached the application screen. The status file then read requested 1600, last seen 1600, readback 1600, 60 clamps, and no CPU override. The shell clock line was CPU 3200 MHz and GFX 1600 MHz. That session did not log a WGP illegal-instruction fault. The unit mark for the broken groups is [`DEFECTIVE_APU.md`](DEFECTIVE_APU.md).
