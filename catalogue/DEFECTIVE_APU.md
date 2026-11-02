@@ -16,7 +16,9 @@ echo 1600000000 > /sys/class/devfreq/ps5-gpufreq/max_freq
 
 The steps under that cap are 400, 800, 1200 and 1600 MHz. The step that stops the graphics ring is 2000 MHz, and the driver will otherwise climb to 2230 MHz. A oneshot service makes the write survive until the next reboot. `amdgpu.gpu_recovery=0` on the kernel command line keeps a later stall from taking the display down with a failed reset. Do not add `amdgpu.dpm=0`. That option has left this kernel with a dark screen.
 
-On the PS5 menu the Linux service does nothing. The shell raises `gfxclk` to 2230 MHz when a native title boosts. Load `gpu-hold-1600.elf` from the payload manager, leave that payload running, then start the game. Source is [`gpu-hold-1600.c`](gpu-hold-1600.c). Every 50 ms it reads `gfxclk` and, when the value is above 1600, writes 1600 back. Home at 900 MHz is left alone. Status is `/data/gpu-hold-1600.bin`.
+On the PS5 menu the Linux service does nothing. The shell raises `gfxclk` to 2230 MHz when a native title boosts. Load `gpu-hold-1600.elf` from the payload manager, leave that payload running, then start the game. Source is [`gpu-hold-1600.c`](gpu-hold-1600.c). The built ELF is attached to the [defective-apu release](https://github.com/acaburaz/ps5gputester/releases/tag/defective-apu). Every 50 ms it reads `gfxclk` and, when the value is above 1600, writes 1600 back. Home at 900 MHz is left alone. Status is `/data/gpu-hold-1600.bin`.
+
+It worked on PS5 firmware **13.60** (`kernel_get_fw_version` `0x13600007`). On that version Astro's Playroom reached the game with `gfxclk` held at 1600 MHz. The file is 111160 bytes, SHA-256 `2251eda411080d16978a22b4304cd06dc6df794da2cf1e79aa91e4597027c8ab`.
 
 Masking WGP 3 and WGP 4 down to 24 CUs was tried. The ring still stopped at 2.0 GHz. The clock ceiling is the change that mattered.
 

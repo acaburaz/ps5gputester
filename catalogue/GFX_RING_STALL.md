@@ -101,7 +101,7 @@ A one-shot write before a title starts is not enough. The shell raises the GPU c
 
 ## Holder
 
-`gpu-hold-1600.elf` is the holder. Source is [`gpu-hold-1600.c`](gpu-hold-1600.c). Load it from the payload manager and leave it running, then start the game.
+`gpu-hold-1600.elf` is the holder. Source is [`gpu-hold-1600.c`](gpu-hold-1600.c). The ELF that ran is on the [defective-apu release](https://github.com/acaburaz/ps5gputester/releases/tag/defective-apu) (111160 bytes, SHA-256 `2251eda411080d16978a22b4304cd06dc6df794da2cf1e79aa91e4597027c8ab`). It worked on PS5 firmware 13.60 (`0x13600007`). Load it from the payload manager and leave it running, then start the game.
 
 - Every 50 ms it reads `gfxclk`.
 - When the value is above 1600 it writes 1600 and reads it back.
